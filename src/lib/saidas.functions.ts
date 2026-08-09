@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/lib/auth-middleware";
+import { requireSupabaseAuth, tenantDoUsuario } from "@/lib/auth-middleware";
+import { faixaDaLoja } from "@/lib/relatorios";
 
 /** Sugestões iniciais. Cada loja escolhe as suas no Admin. */
 export const categoriasSaidaPadrao = [
@@ -22,7 +23,6 @@ const saidaSchema = z.object({
   client_op_id: z.string().min(6).max(80).optional(),
 });
 
-
 const dia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const periodoSchema = z.object({
@@ -31,36 +31,16 @@ const periodoSchema = z.object({
   /** intervalo YYYY-MM-DD … YYYY-MM-DD */
   de: dia.optional(),
   ate: dia.optional(),
+  /** fuso da loja (getTimezoneOffset do navegador): o servidor roda em UTC */
+  offsetMin: z.number().int().min(-900).max(900).default(0),
 });
-
-/** Recorte do dia local (00:00 → 23:59:59.999) em ISO, para consultar o banco. */
-export function faixaDoDia(dia?: string) {
-  const base = dia ? new Date(`${dia}T00:00:00`) : new Date();
-  const inicio = new Date(base);
-  inicio.setHours(0, 0, 0, 0);
-  const fim = new Date(inicio);
-  fim.setDate(fim.getDate() + 1);
-  return { inicio: inicio.toISOString(), fim: fim.toISOString() };
-}
-
-/** Recorte de um intervalo de dias locais, fim exclusivo. */
-export function faixaDoPeriodo(de?: string, ate?: string) {
-  const inicio = new Date(de ? `${de}T00:00:00` : new Date().setHours(0, 0, 0, 0));
-  inicio.setHours(0, 0, 0, 0);
-  const fim = new Date(ate ? `${ate}T00:00:00` : inicio);
-  fim.setHours(0, 0, 0, 0);
-  fim.setDate(fim.getDate() + 1);
-  return { inicio: inicio.toISOString(), fim: fim.toISOString() };
-}
 
 /** Saídas lançadas no período escolhido, mais recentes primeiro. */
 export const listarSaidas = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => periodoSchema.parse(input ?? {}))
   .handler(async ({ data, context }) => {
-    const { inicio, fim } = data.dia
-      ? faixaDoDia(data.dia)
-      : faixaDoPeriodo(data.de, data.ate);
+    const { inicio, fim } = faixaDaLoja(data.dia ?? data.de, data.dia ?? data.ate, data.offsetMin);
     const { data: linhas, error } = await context.supabase
       .from("expenses")
       .select("id, description, amount, category, occurred_at")
@@ -72,7 +52,7 @@ export const listarSaidas = createServerFn({ method: "GET" })
       id: l.id,
       description: l.description,
       amount: Number(l.amount ?? 0),
-      category: l.category ?? "Outros",
+      category: l.category ?? "Sem categoria",
       occurred_at: l.occurred_at,
     }));
   });
@@ -83,13 +63,7 @@ export const salvarSaida = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => saidaSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { data: perfil, error: erroPerfil } = await supabase
-      .from("profiles")
-      .select("tenant_id")
-      .eq("id", userId)
-      .maybeSingle();
-    if (erroPerfil) throw new Error(erroPerfil.message);
-    if (!perfil) throw new Error("Perfil da loja não encontrado.");
+    const tenant = await tenantDoUsuario(context);
 
     /* Reenvio da fila offline: se já entrou, devolve a linha existente. */
     if (data.client_op_id) {
@@ -104,10 +78,10 @@ export const salvarSaida = createServerFn({ method: "POST" })
     const { data: nova, error } = await supabase
       .from("expenses")
       .insert({
-        tenant_id: perfil.tenant_id,
+        tenant_id: tenant,
         description: data.description,
         amount: data.amount,
-        category: data.category,
+        category: data.category?.trim() || null,
         occurred_at: data.occurred_at ?? new Date().toISOString(),
         created_by: userId,
         client_op_id: data.client_op_id ?? null,

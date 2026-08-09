@@ -1,6 +1,6 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { supabaseServidor } from "@/integrations/supabase/env.server";
@@ -29,6 +29,35 @@ function fetchSupabase(chave: string): typeof fetch {
   };
 }
 
+/* Validar a sessão contra o Supabase a cada clique custava uma ida à rede
+   antes de qualquer coisa. O resultado agora é lembrado por alguns minutos —
+   o mesmo token dentro da validade não paga esse pedágio de novo. */
+type Sessao = { userId: string; claims: Record<string, unknown>; ate: number };
+const sessoes = new Map<string, Sessao>();
+const VALIDADE = 5 * 60_000;
+
+function lembrada(token: string) {
+  const s = sessoes.get(token);
+  if (!s) return null;
+  if (s.ate < Date.now()) {
+    sessoes.delete(token);
+    return null;
+  }
+  return s;
+}
+
+function guardar(token: string, userId: string, claims: Record<string, unknown>, exp?: number) {
+  /* nunca além da expiração do próprio token */
+  const limite = exp ? exp * 1000 : Number.POSITIVE_INFINITY;
+  const ate = Math.min(Date.now() + VALIDADE, limite);
+  if (ate <= Date.now()) return;
+  if (sessoes.size > 500) sessoes.clear();
+  sessoes.set(token, { userId, claims, ate });
+}
+
+/* A loja do usuário também era consultada em toda gravação. */
+const lojas = new Map<string, { tenant: string; ate: number }>();
+
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
     const { url, chave } = supabaseServidor();
@@ -51,13 +80,43 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
       auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
     });
 
+    const cache = lembrada(token);
+    if (cache) {
+      return next({
+        context: { supabase, userId: cache.userId, claims: cache.claims },
+      });
+    }
+
     const { data, error } = await supabase.auth.getClaims(token);
     if (error || !data?.claims?.sub) {
       throw new Error("Sessão expirada. Entre novamente.");
     }
 
+    const claims = data.claims as Record<string, unknown>;
+    guardar(token, claims.sub as string, claims, typeof claims.exp === "number" ? claims.exp : undefined);
+
     return next({
-      context: { supabase, userId: data.claims.sub as string, claims: data.claims },
+      context: { supabase, userId: claims.sub as string, claims },
     });
   },
 );
+
+type ContextoLoja = { supabase: SupabaseClient<Database>; userId: string };
+
+/** Loja (tenant) do usuário logado, lembrada por alguns minutos. */
+export async function tenantDoUsuario(context: ContextoLoja): Promise<string> {
+  const guardado = lojas.get(context.userId);
+  if (guardado && guardado.ate > Date.now()) return guardado.tenant;
+
+  const { data, error } = await context.supabase
+    .from("profiles")
+    .select("tenant_id")
+    .eq("id", context.userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Perfil da loja não encontrado.");
+
+  lojas.set(context.userId, { tenant: data.tenant_id as string, ate: Date.now() + VALIDADE });
+  return data.tenant_id as string;
+}
+

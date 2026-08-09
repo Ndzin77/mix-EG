@@ -162,8 +162,10 @@ function RelatoriosPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* Faixa fixa: os três números que respondem tudo em 2 segundos. */}
-            <div className="sticky top-0 z-20 -mx-5 -mt-5 grid gap-3 bg-background px-5 pb-3 pt-5 sm:grid-cols-3">
+            {/* Faixa de topo: os três números que respondem tudo em 2 segundos.
+                Rola junto com a página — grudada, ela tampava o conteúdo. */}
+            <div className="grid gap-3 sm:grid-cols-3">
+
               <article className="rounded-xl border-l-4 border-success bg-card p-4 shadow-sm">
                 <p className="eyebrow text-success">Entradas</p>
                 <p className="money mt-1 text-4xl leading-none tabular-nums text-success">

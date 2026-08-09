@@ -42,6 +42,19 @@ export function instante(dia: string, offsetMin: number, somarDias = 0) {
 export const naLoja = (iso: string | Date, offsetMin: number) =>
   new Date(new Date(iso).getTime() - offsetMin * 60_000);
 
+/** Recorte de dias no relógio da loja (fim exclusivo), em ISO para o banco.
+ *  O servidor roda em UTC: sem o fuso, venda das 22h cairia no dia seguinte. */
+export function faixaDaLoja(de: string | undefined, ate: string | undefined, offsetMin: number) {
+  const hoje = new Date(Date.now() - offsetMin * 60_000).toISOString().slice(0, 10);
+  const primeiro = de ?? hoje;
+  const ultimo = ate ?? primeiro;
+  return {
+    inicio: instante(primeiro, offsetMin).toISOString(),
+    fim: instante(ultimo, offsetMin, 1).toISOString(),
+    dia: primeiro,
+  };
+}
+
 /** Intervalo pronto de cada atalho, em dias locais. */
 export function intervaloPreset(p: PresetId, hoje = new Date()): Intervalo {
   const base = new Date(hoje);
@@ -199,4 +212,71 @@ export function rotuloAnterior(intervalo: Intervalo) {
 export function variacao(agora: number, antes: number): number | null {
   if (!antes) return agora > 0 ? 100 : null;
   return Math.round(((agora - antes) / antes) * 100);
+}
+
+/* ---------- Modos de semana ----------------------------------------------
+ * A loja conta semana de três jeitos, e cada um responde a uma pergunta:
+ *  "fixa"  → dias 1–7, 8–14…  (comparar o mesmo pedaço de todo mês)
+ *  "mes"   → quebra no sábado (o fim de semana inteiro fica junto)
+ *  "ano"   → semana 1…53 do ano (visão longa, sem se prender ao mês)      */
+export const modosSemana = ["fixa", "mes", "ano"] as const;
+export type ModoSemana = (typeof modosSemana)[number];
+
+export const rotuloModoSemana: Record<ModoSemana, string> = {
+  fixa: "1 a 7",
+  mes: "Do mês",
+  ano: "Do ano",
+};
+
+/** Blocos fixos de 7 dias dentro do mês (1–7, 8–14, …). */
+export function semanasFixas(ano: number, mes: number): SemanaMes[] {
+  const ultimo = new Date(ano, mes + 1, 0).getDate();
+  const lista: SemanaMes[] = [];
+  let n = 1;
+  for (let inicio = 1; inicio <= ultimo; inicio += 7) {
+    const fim = Math.min(inicio + 6, ultimo);
+    lista.push({ n, de: diaIso(new Date(ano, mes, inicio)), ate: diaIso(new Date(ano, mes, fim)) });
+    n += 1;
+  }
+  return lista;
+}
+
+/** Semanas do ano inteiro, sempre de domingo a sábado, aparadas no ano. */
+export function semanasDoAno(ano: number): SemanaMes[] {
+  const primeiro = new Date(ano, 0, 1);
+  const ultimoDia = new Date(ano, 11, 31);
+  const lista: SemanaMes[] = [];
+  let inicio = new Date(primeiro);
+  let n = 1;
+  while (inicio <= ultimoDia) {
+    const fimSemana = new Date(inicio);
+    fimSemana.setDate(inicio.getDate() + (6 - inicio.getDay()));
+    const fim = fimSemana > ultimoDia ? ultimoDia : fimSemana;
+    lista.push({ n, de: diaIso(inicio), ate: diaIso(fim) });
+    inicio = new Date(fim);
+    inicio.setDate(inicio.getDate() + 1);
+    n += 1;
+  }
+  return lista;
+}
+
+/** Lista de semanas do modo escolhido. */
+export function semanasDoModo(modo: ModoSemana, ano: number, mes: number): SemanaMes[] {
+  if (modo === "fixa") return semanasFixas(ano, mes);
+  if (modo === "ano") return semanasDoAno(ano);
+  return semanasDoMes(ano, mes);
+}
+
+/** Se o intervalo é exatamente uma semana do modo, qual é. */
+export function semanaDoModo(
+  modo: ModoSemana,
+  intervalo: Intervalo,
+  ano: number,
+  mes: number,
+): SemanaMes | null {
+  return (
+    semanasDoModo(modo, ano, mes).find(
+      (s) => s.de === intervalo.de && s.ate === intervalo.ate,
+    ) ?? null
+  );
 }

@@ -243,9 +243,12 @@ export type Database = {
           image_url: string | null
           name: string
           price: number
+          price_per_kg: number
+          pricing_mode: string
           tags: string[]
           tenant_id: string
           updated_at: string
+          variants: Json
         }
         Insert: {
           active?: boolean
@@ -256,9 +259,12 @@ export type Database = {
           image_url?: string | null
           name: string
           price?: number
+          price_per_kg?: number
+          pricing_mode?: string
           tags?: string[]
           tenant_id: string
           updated_at?: string
+          variants?: Json
         }
         Update: {
           active?: boolean
@@ -269,9 +275,12 @@ export type Database = {
           image_url?: string | null
           name?: string
           price?: number
+          price_per_kg?: number
+          pricing_mode?: string
           tags?: string[]
           tenant_id?: string
           updated_at?: string
+          variants?: Json
         }
         Relationships: [
           {
@@ -324,6 +333,7 @@ export type Database = {
           alerta_min: number
           atraso_min: number
           caixa_privado: boolean
+          categorias_produto: string[]
           categorias_saida: string[]
           created_at: string
           cronometro_ativo: boolean
@@ -345,6 +355,7 @@ export type Database = {
           alerta_min?: number
           atraso_min?: number
           caixa_privado?: boolean
+          categorias_produto?: string[]
           categorias_saida?: string[]
           created_at?: string
           cronometro_ativo?: boolean
@@ -366,6 +377,7 @@ export type Database = {
           alerta_min?: number
           atraso_min?: number
           caixa_privado?: boolean
+          categorias_produto?: string[]
           categorias_saida?: string[]
           created_at?: string
           cronometro_ativo?: boolean

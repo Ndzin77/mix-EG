@@ -12,7 +12,11 @@ import {
   rotuloMes,
   rotuloPreset,
   semanaDoIntervalo,
-  semanasDoMes,
+  semanaDoModo,
+  semanasDoModo,
+  modosSemana,
+  rotuloModoSemana,
+  type ModoSemana,
   type Intervalo,
 } from "@/lib/relatorios";
 import { cn } from "@/lib/utils";
@@ -52,7 +56,8 @@ export function SeletorPeriodo({
   const [mesBase, setMesBase] = useState<{ ano: number; mes: number } | null>(null);
   const ativo = presetDoIntervalo(valor);
   const hoje = diaIso(new Date());
-  const semanaAtiva = semanaDoIntervalo(valor);
+  /** como a loja quer contar semana: 1–7, do mês (quebra no sábado) ou do ano */
+  const [modo, setModo] = useState<ModoSemana>("mes");
 
   useEffect(() => {
     setDe(valor.de);
@@ -105,7 +110,8 @@ export function SeletorPeriodo({
     setAberto(false);
   };
 
-  const semanas = mesBase ? semanasDoMes(mesBase.ano, mesBase.mes) : [];
+  const semanas = mesBase ? semanasDoModo(modo, mesBase.ano, mesBase.mes) : [];
+  const semanaAtiva = mesBase ? semanaDoModo(modo, valor, mesBase.ano, mesBase.mes) : null;
 
   return (
     <div ref={caixa} className="no-print relative">
@@ -159,12 +165,37 @@ export function SeletorPeriodo({
             {mesBase ? (
               <div className="mb-4">
                 <span className="eyebrow text-muted-foreground">
-                  Semanas de {rotuloMes(mesBase.ano, mesBase.mes)}
+                  {modo === "ano"
+                    ? `Semanas de ${mesBase.ano}`
+                    : `Semanas de ${rotuloMes(mesBase.ano, mesBase.mes)}`}
                 </span>
-                <div className="mt-2 grid gap-1.5">
+                <div className="mt-2 flex gap-1 rounded-xl bg-secondary/40 p-1">
+                  {modosSemana.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setModo(m)}
+                      className={cn(
+                        "h-8 flex-1 rounded-lg text-xs font-black uppercase tracking-wide transition-colors",
+                        modo === m
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {rotuloModoSemana[m]}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 grid max-h-64 gap-1.5 overflow-y-auto pr-1">
                   <button
                     type="button"
-                    onClick={() => onMudar(mesInteiro(mesBase.ano, mesBase.mes))}
+                    onClick={() =>
+                      onMudar(
+                        modo === "ano"
+                          ? { de: `${mesBase.ano}-01-01`, ate: diaIso(new Date()) }
+                          : mesInteiro(mesBase.ano, mesBase.mes),
+                      )
+                    }
                     className={cn(
                       "h-9 rounded-lg px-3 text-left text-xs font-black uppercase tracking-wide transition-colors",
                       !semanaAtiva
@@ -172,7 +203,7 @@ export function SeletorPeriodo({
                         : "border border-border text-muted-foreground hover:border-primary/60 hover:text-foreground",
                     )}
                   >
-                    Mês inteiro
+                    {modo === "ano" ? "Ano inteiro" : "Mês inteiro"}
                   </button>
                   {semanas.map((s) => {
                     const futura = s.de > hoje;

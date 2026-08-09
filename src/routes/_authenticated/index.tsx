@@ -17,15 +17,29 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
+import { CampoQtd } from "@/components/pdv/campo-qtd";
 import { GradeProdutos } from "@/components/pdv/grade-produtos";
 import { ModalCliente } from "@/components/pdv/modal-cliente";
-import { ModalCobranca, type CobrancaEstado } from "@/components/pdv/modal-cobranca";
+import { ModalCobranca } from "@/components/pdv/modal-cobranca";
+import { resumoCobranca, type CobrancaEstado } from "@/lib/cobranca";
+
 import { PainelLateral } from "@/components/pdv/painel-lateral";
-import { Realce, buscar, useContagem, type ComandaCard, type Linha, type Produto } from "@/components/pdv/comum";
+import {
+  Foto,
+  Realce,
+  buscar,
+  modoDoProduto,
+  seloPreco,
+  useContagem,
+  type ComandaCard,
+  type Linha,
+  type Produto,
+} from "@/components/pdv/comum";
+import { ModalPreco, type PrecoResolvido } from "@/components/pdv/modal-preco";
+import { useImagens } from "@/lib/imagens";
 import { ModalRecibo } from "@/components/recibo/recibo";
 import type { ReciboDados } from "@/lib/recibo";
 import { brl, useConfig } from "@/lib/config";
-import { useSincronizarConfig } from "@/lib/use-config-sync";
 
 import { cn } from "@/lib/utils";
 import { listarProdutos } from "@/lib/loja.functions";
@@ -33,7 +47,6 @@ import type { PedidoInput } from "@/lib/vendas.functions";
 import { enviar } from "@/lib/offline";
 import { novoId } from "@/lib/fila-offline";
 import { AvisoErro } from "@/components/aviso-erro";
-
 
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
@@ -66,16 +79,15 @@ const cobrancaInicial: CobrancaEstado = {
   partes: [],
   parcial: null,
   recebido: null,
+  trocoDoado: false,
 };
 
 
 function VendasPage() {
-  useSincronizarConfig();
   const [loja] = useConfig();
 
   const queryClient = useQueryClient();
   const buscarProdutos = useServerFn(listarProdutos);
-
 
   const produtosQuery = useQuery({
     queryKey: ["produtos"],
@@ -94,11 +106,32 @@ function VendasPage() {
           preco: Number(p.price),
           tags: p.tags ?? [],
           foto: p.image_url ?? null,
+          modo: (p.pricing_mode ?? "fixed") as Produto["modo"],
+          precoKg: Number(p.price_per_kg ?? 0),
+          sabores: Array.isArray(p.variants)
+            ? (
+                p.variants as {
+                  nome?: string;
+                  preco?: number;
+                  modo?: string;
+                  precoKg?: number;
+                }[]
+              ).map((v) => ({
+                nome: String(v?.nome ?? ""),
+                preco: Number(v?.preco ?? 0),
+                modo: (v?.modo === "manual" || v?.modo === "weight" ? v.modo : "fixed") as
+                  | "fixed"
+                  | "manual"
+                  | "weight",
+                precoKg: Number(v?.precoKg ?? 0),
+              }))
+            : [],
         })),
     [produtosQuery.data],
   );
 
   const rapidos = useMemo(() => catalogo.slice(0, 6), [catalogo]);
+  const urlDe = useImagens(catalogo.map((p) => p.foto));
 
   const [carrinho, setCarrinho] = useState<Linha[]>([]);
   const [comandaAtiva, setComandaAtiva] = useState<{
@@ -118,20 +151,23 @@ function VendasPage() {
   const [recibo, setRecibo] = useState<ReciboDados | null>(null);
   const [fechada, setFechada] = useState<number | null>(null);
 
+  /** produto esperando o preço (sabor, valor na hora ou peso) */
+  const [precoDe, setPrecoDe] = useState<Produto | null>(null);
   const [cobrando, setCobrando] = useState(false);
   const [nomeando, setNomeando] = useState(false);
   /** faixa de atalhos recolhida: devolve altura para a grade e o carrinho */
-  const [atalhosAbertos, setAtalhosAbertos] = useState(false);
+  const [atalhosFixados, setAtalhosFixados] = useState(false);
+  const [atalhosHover, setAtalhosHover] = useState(false);
   const [nomeCliente, setNomeCliente] = useState("");
   const buscaRef = useRef<HTMLInputElement>(null);
 
   /* A escolha da dona fica lembrada no aparelho. */
   useEffect(() => {
-    setAtalhosAbertos(localStorage.getItem("pdv-atalhos") === "1");
+    setAtalhosFixados(localStorage.getItem("pdv-atalhos") === "1");
   }, []);
 
   const alternarAtalhos = useCallback(() => {
-    setAtalhosAbertos((v) => {
+    setAtalhosFixados((v) => {
       localStorage.setItem("pdv-atalhos", v ? "0" : "1");
       return !v;
     });
@@ -183,15 +219,27 @@ function VendasPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-
   const gravando = mutacao.isPending || mutacaoItens.isPending;
 
-  const adicionar = useCallback((p: Produto) => {
+  /** Preço fixo entra direto; os outros modos passam pelo modal de preço. */
+  const lancar = useCallback((p: Produto, r?: PrecoResolvido) => {
     setCarrinho((atual) => {
-      const existe = atual.find((l) => l.id === p.id);
-      return existe
-        ? atual.map((l) => (l.id === p.id ? { ...l, qtd: l.qtd + 1 } : l))
-        : [...atual, { ...p, qtd: 1 }];
+      /* Só o preço fixo agrupa: duas pesagens diferentes são duas linhas. */
+      if (!r) {
+        const existe = atual.find((l) => l.uid === p.id);
+        if (existe) return atual.map((l) => (l.uid === p.id ? { ...l, qtd: l.qtd + 1 } : l));
+        return [...atual, { ...p, uid: p.id, qtd: 1 }];
+      }
+      return [
+        ...atual,
+        {
+          ...p,
+          uid: `${p.id}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+          preco: r.preco,
+          rotulo: r.rotulo,
+          qtd: r.qtd,
+        },
+      ];
     });
     setUltimo(p.id);
     setBump(p.id);
@@ -200,25 +248,41 @@ function VendasPage() {
     buscaRef.current?.focus();
   }, []);
 
-  const alterar = (id: string, delta: number) => {
-    setBump(id);
+  const adicionar = useCallback(
+    (p: Produto) => {
+      if (modoDoProduto(p) === "fixed") lancar(p);
+      else setPrecoDe(p);
+    },
+    [lancar],
+  );
+
+  const alterar = (uid: string, delta: number) => {
+    setBump(uid);
     setCarrinho((atual) =>
       atual.flatMap((l) =>
-        l.id === id ? (l.qtd + delta <= 0 ? [] : [{ ...l, qtd: l.qtd + delta }]) : [l],
+        l.uid === uid ? (l.qtd + delta <= 0 ? [] : [{ ...l, qtd: l.qtd + delta }]) : [l],
       ),
     );
   };
 
   const remover = (linha: Linha) => {
-    setDesfazer({ label: `${linha.nome} removido`, snapshot: carrinho });
-    setCarrinho((atual) => atual.filter((l) => l.id !== linha.id));
+    setDesfazer({ label: `${linha.rotulo ?? linha.nome} removido`, snapshot: carrinho });
+    setCarrinho((atual) => atual.filter((l) => l.uid !== linha.uid));
   };
 
-  const limpar = useCallback(() => {
-    setCarrinho((atual) => {
-      if (atual.length) setDesfazer({ label: "Venda limpa", snapshot: atual });
-      return [];
-    });
+  /** Quantidade digitada: zero (ou campo vazio) tira a linha, com desfazer. */
+  const definirQtd = (linha: Linha, n: number) => {
+    if (n <= 0) {
+      remover(linha);
+      return;
+    }
+    setBump(linha.uid);
+    setCarrinho((atual) => atual.map((l) => (l.uid === linha.uid ? { ...l, qtd: n } : l)));
+  };
+
+
+  /** Soltar a conta é só desgrudar do nome — o que já foi selecionado fica. */
+  const soltarConta = useCallback(() => {
     setComandaAtiva(null);
     setDestino(null);
     setNomeando(false);
@@ -226,11 +290,20 @@ function VendasPage() {
     setCobranca(cobrancaInicial);
   }, []);
 
+  /** Limpar de verdade: esvazia a tela, com desfazer de 6 segundos. */
+  const limpar = useCallback(() => {
+    setCarrinho((atual) => {
+      if (atual.length) setDesfazer({ label: "Venda limpa", snapshot: atual });
+      return [];
+    });
+    soltarConta();
+  }, [soltarConta]);
+
   const linhasParaBanco = useCallback(
     (linhas: Linha[]) =>
       linhas.map((l) => ({
         product_id: l.id.includes("-") && l.id.length === 36 ? l.id : null,
-        product_name: l.nome,
+        product_name: l.rotulo ?? l.nome,
         unit_price: l.preco,
         quantity: l.qtd,
       })),
@@ -240,15 +313,12 @@ function VendasPage() {
   /* Fechar precisa terminar em algo que se vê e se sente: varredura + selo. */
   const finalizar = useCallback(async () => {
     if (!carrinho.length || gravando) return;
-    const desconto = Math.min(cobranca.desconto, total);
-    const valor = Math.round((total - desconto) * 100) / 100;
-    const pago = cobranca.partes.reduce((s, p) => s + p.valor, 0);
-    /* Sem partes encaixadas, a venda inteira sai na forma selecionada. */
-    const partes = cobranca.partes.length
-      ? valor - pago > 0.005
-        ? [...cobranca.partes, { forma: cobranca.pagamento, valor: Math.round((valor - pago) * 100) / 100 }]
-        : cobranca.partes
-      : [{ forma: cobranca.pagamento, valor }];
+    /* Mesma conta do modal: o que entrou é o que a venda vale. */
+    const resumo = resumoCobranca(total, cobranca);
+    const valor = resumo.cobrado;
+    /* Recebeu menos que os produtos? vira desconto. Recebeu mais? acréscimo. */
+    const desconto = Math.max(0, Math.round((total - valor) * 100) / 100);
+    const partes = resumo.partes;
     const label = comandaAtiva?.label ?? destino ?? "Balcão";
     try {
       const envio = await mutacao.mutateAsync({
@@ -259,7 +329,7 @@ function VendasPage() {
           payment_method: partes[0]!.forma,
           discount: desconto,
           payments: partes.map((p) => ({ method: p.forma, amount: p.valor })),
-          received: cobranca.recebido,
+          received: resumo.recebido,
           items: linhasParaBanco(carrinho),
         },
       });
@@ -288,12 +358,10 @@ function VendasPage() {
           desconto,
           total: valor,
           pagamentos: partes.map((p) => ({ forma: p.forma, valor: p.valor })),
-          recebido: cobranca.recebido,
-          troco:
-            cobranca.recebido != null
-              ? Math.round(Math.max(cobranca.recebido - valor, 0) * 100) / 100
-              : null,
+          recebido: resumo.recebido,
+          troco: resumo.troco > 0.005 ? resumo.troco : null,
         });
+
         toast.warning("Sem internet: venda guardada no aparelho e recibo pronto para imprimir.");
       } else if (envio.resultado?.recibo) {
         setRecibo(envio.resultado.recibo);
@@ -304,14 +372,24 @@ function VendasPage() {
     }
   }, [carrinho, cobranca, comandaAtiva, destino, gravando, linhasParaBanco, mutacao, total]);
 
-
-
   /* Guardar a venda como comanda em aberto (cliente que paga depois). */
   const guardarComanda = useCallback(
     async (nome: string) => {
       const label = nome.trim() || "Cliente sem nome";
       if (!carrinho.length || gravando) return;
       const linhas = linhasParaBanco(carrinho);
+      /* A tela não espera o banco: o pop-up fecha na hora e a gravação segue
+         por baixo. Se falhar, os itens voltam para a tela. */
+      const snapshot = carrinho;
+      const contaAnterior = comandaAtiva;
+      setCarrinho([]);
+      setComandaAtiva(null);
+      setDestino(null);
+      setCobranca(cobrancaInicial);
+      setNomeando(false);
+      setNomeCliente("");
+      setCobrando(false);
+      buscaRef.current?.focus();
       try {
         if (comandaAtiva?.somando) {
           const envio = await mutacaoItens.mutateAsync({
@@ -352,20 +430,13 @@ function VendasPage() {
             toast.success(`Anotado na conta de ${label}`);
           }
         }
-        setCarrinho([]);
-        setComandaAtiva(null);
-        setDestino(null);
-        setCobranca(cobrancaInicial);
-        setNomeando(false);
-        setNomeCliente("");
-        setCobrando(false);
-        buscaRef.current?.focus();
       } catch {
-        /* erro já sinalizado no onError */
+        /* Deu erro na gravação: devolve o que estava na tela para não perder venda. */
+        setCarrinho(snapshot);
+        setComandaAtiva(contaAnterior);
       }
     },
     [carrinho, comandaAtiva, gravando, linhasParaBanco, mutacao, mutacaoItens, queryClient],
-
   );
 
   const anotar = useCallback(() => {
@@ -375,11 +446,15 @@ function VendasPage() {
   }, [comandaAtiva, destino, guardarComanda]);
 
   const abrirComanda = useCallback((comanda: ComandaCard, receber: boolean) => {
-    const jaNaConta = comanda.itens.reduce((s, i) => s + Number(i.unit_price) * Number(i.quantity), 0);
+    const jaNaConta = comanda.itens.reduce(
+      (s, i) => s + Number(i.unit_price) * Number(i.quantity),
+      0,
+    );
     if (receber) {
       /* Receber: puxa a conta inteira para fechar de uma vez. */
       setCarrinho(
-        comanda.itens.map((i) => ({
+        comanda.itens.map((i, ix) => ({
+          uid: i.id ?? `${comanda.id}-${ix}`,
           id: i.product_id ?? `${comanda.id}-${i.product_name}`,
           cod: "",
           nome: i.product_name,
@@ -389,10 +464,9 @@ function VendasPage() {
           qtd: Number(i.quantity),
         })),
       );
-    } else {
-      /* Somar itens: carrinho limpo, nada do que já foi lançado é reescrito. */
-      setCarrinho([]);
     }
+    /* Somar itens: o que já estava selecionado continua — é justamente o que a
+       pessoa quer lançar nessa conta. Nada do que já foi gravado é reescrito. */
     setComandaAtiva({ id: comanda.id, label: comanda.label, somando: !receber, jaNaConta });
     setDestino(null);
     setNomeando(false);
@@ -449,12 +523,17 @@ function VendasPage() {
 
       const enter = e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter";
       /* Cobrar: Ctrl/Cmd+Enter em qualquer lugar, ou Enter puro fora dos campos. */
-      if (enter && !cobrando && !nomeando && ((e.ctrlKey || e.metaKey) || !digitando)) {
+      if (enter && !cobrando && !nomeando && (e.ctrlKey || e.metaKey || !digitando)) {
         e.preventDefault();
         if (carrinho.length) setCobrando(true);
         return;
       }
       if (digitando) return;
+      if ((e.key === "a" || e.key === "A") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (carrinho.length) anotar();
+        return;
+      }
       const f = /^F([1-9])$/.exec(e.key);
       if (f) {
         const i = Number(f[1]) - 1;
@@ -474,7 +553,7 @@ function VendasPage() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [adicionar, limpar, termo, rapidos, carrinho.length, cobrando, nomeando]);
+  }, [adicionar, anotar, limpar, termo, rapidos, carrinho.length, cobrando, nomeando]);
 
   const onBuscaKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
@@ -493,6 +572,8 @@ function VendasPage() {
   };
 
   const alvoAtual = comandaAtiva?.label ?? destino;
+  /* Passar o mouse já abre os atalhos; o clique deixa fixo para quem usa toque. */
+  const atalhosAbertos = atalhosFixados || atalhosHover;
 
   return (
     <AppShell
@@ -562,6 +643,7 @@ function VendasPage() {
                       i === ativo ? "bg-primary-soft" : "hover:bg-secondary/40",
                     )}
                   >
+                    <Foto produto={p} url={urlDe(p.foto)} className="size-11 shrink-0" />
                     <span className="money w-14 shrink-0 rounded-md bg-foreground/8 px-1.5 py-0.5 text-center text-base leading-6 text-muted-foreground">
                       <Realce texto={p.cod || "—"} termo={termo} />
                     </span>
@@ -573,7 +655,9 @@ function VendasPage() {
                         {[p.detalhe, p.tags.join(" · ")].filter(Boolean).join(" · ")}
                       </span>
                     </span>
-                    <span className="money shrink-0 text-xl leading-none">R$ {brl(p.preco)}</span>
+                    <span className="money shrink-0 text-xl leading-none">
+                      {seloPreco(p) ?? `R$ ${brl(p.preco)}`}
+                    </span>
                     {i === ativo ? (
                       <CornerDownLeft className="size-4 shrink-0 text-primary" />
                     ) : (
@@ -587,7 +671,11 @@ function VendasPage() {
         </div>
 
         {/* Atalhos recolhidos: uma linha fina que abre num toque. */}
-        <div className={cn("relative z-10 mt-3 transition-opacity", buscando && "opacity-40")}>
+        <div
+          onMouseEnter={() => setAtalhosHover(true)}
+          onMouseLeave={() => setAtalhosHover(false)}
+          className={cn("relative z-10 mt-3 transition-opacity", buscando && "opacity-40")}
+        >
           <button
             type="button"
             onClick={alternarAtalhos}
@@ -598,9 +686,6 @@ function VendasPage() {
               className={cn("size-4 transition-transform", atalhosAbertos && "rotate-180")}
             />
             <span className="eyebrow">Mais vendidos</span>
-            <span className="text-[0.6875rem] text-muted-foreground/70">
-              {rapidos.length} atalhos
-            </span>
           </button>
           {produtosQuery.isError ? (
             <div className="mt-2">
@@ -629,9 +714,10 @@ function VendasPage() {
                     "h-19 justify-between py-3",
                   )}
                 >
+                  <Foto produto={p} url={urlDe(p.foto)} className="mb-1 size-9" />
                   <p className="line-clamp-2 text-sm font-bold leading-tight">{p.nome}</p>
                   <p className="money tile-price text-lg leading-none text-primary">
-                    R$ {brl(p.preco)}
+                    {seloPreco(p) ?? `R$ ${brl(p.preco)}`}
                   </p>
                 </button>
               ))}
@@ -681,7 +767,8 @@ function VendasPage() {
               )}
             </div>
             <button
-              onClick={limpar}
+              onClick={soltarConta}
+              title="Solta o nome da conta — os itens continuam na tela"
               className="press shrink-0 rounded-lg bg-card px-3 py-2 text-sm font-bold transition-colors hover:bg-accent"
             >
               Soltar
@@ -698,7 +785,7 @@ function VendasPage() {
         ) : (
           carrinho.map((item, i) => (
             <div
-              key={item.id}
+              key={item.uid}
               style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}
               className={cn(
                 "rise-in grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-xl border border-border bg-card p-3 pl-4 shadow-sm",
@@ -706,35 +793,38 @@ function VendasPage() {
                 ultimo === item.id && "flash-in border-success",
               )}
             >
-              <div className="min-w-0">
-                <p className="truncate font-semibold leading-tight">{item.nome}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {[item.cod && `Cód. ${item.cod}`, item.detalhe, `R$ ${brl(item.preco)} un.`]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
+              <div className="flex min-w-0 items-center gap-3">
+                <Foto produto={item} url={urlDe(item.foto)} className="size-11 shrink-0" />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold leading-tight">
+                    {item.rotulo ?? item.nome}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {[item.cod && `Cód. ${item.cod}`, item.detalhe, `R$ ${brl(item.preco)} un.`]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 sm:gap-6">
                 <div className="flex items-center overflow-hidden rounded-lg border border-border bg-secondary/50">
                   <button
                     aria-label={`Menos um ${item.nome}`}
-                    onClick={() => alterar(item.id, -1)}
+                    onClick={() => alterar(item.uid, -1)}
                     className="flex size-11 items-center justify-center transition-colors hover:bg-danger-soft hover:text-danger"
                   >
                     <Minus className="size-4" />
                   </button>
-                  <span
-                    aria-live="polite"
-                    className={cn(
-                      "money flex h-11 min-w-12 items-center justify-center border-x border-border bg-card px-2 text-xl leading-none",
-                      bump === item.id && "qty-bump",
-                    )}
-                  >
-                    {item.qtd}
-                  </span>
+                  <CampoQtd
+                    qtd={item.qtd}
+                    nome={item.rotulo ?? item.nome}
+                    destaque={bump === item.uid}
+                    onDefinir={(n) => definirQtd(item, n)}
+                  />
+
                   <button
                     aria-label={`Mais um ${item.nome}`}
-                    onClick={() => alterar(item.id, 1)}
+                    onClick={() => alterar(item.uid, 1)}
                     className="flex size-11 items-center justify-center transition-colors hover:bg-success-soft hover:text-success"
                   >
                     <Plus className="size-4" />
@@ -875,10 +965,19 @@ function VendasPage() {
         />
       ) : null}
 
-      {recibo ? (
-        <ModalRecibo dados={recibo} loja={loja} onFechar={() => setRecibo(null)} />
+      {precoDe ? (
+        <ModalPreco
+          produto={precoDe}
+          url={urlDe(precoDe.foto)}
+          onFechar={() => setPrecoDe(null)}
+          onConfirmar={(r) => {
+            lancar(precoDe, r);
+            setPrecoDe(null);
+          }}
+        />
       ) : null}
 
+      {recibo ? <ModalRecibo dados={recibo} loja={loja} onFechar={() => setRecibo(null)} /> : null}
     </AppShell>
   );
 }

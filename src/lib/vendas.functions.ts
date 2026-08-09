@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/lib/auth-middleware";
+import { requireSupabaseAuth, tenantDoUsuario } from "@/lib/auth-middleware";
 import { somarFormas, type ParteBanco, type PedidoBase } from "@/lib/pagamentos";
+import { faixaDaLoja } from "@/lib/relatorios";
 import type { ReciboDados } from "@/lib/recibo";
 
 const itemSchema = z.object({
@@ -40,7 +41,6 @@ const itensSchema = z.object({
   items: z.array(itemSchema).min(1, "Adicione ao menos um item"),
 });
 
-
 /** Busca as partes de pagamento dos pedidos informados. */
 async function partesDe(
   supabase: { from: (t: "order_payments") => any },
@@ -52,14 +52,14 @@ async function partesDe(
     .select("order_id, method, amount")
     .in("order_id", ids);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((p: { order_id: string; method: ParteBanco["method"]; amount: number | string }) => ({
-    order_id: p.order_id,
-    method: p.method,
-    amount: Number(p.amount ?? 0),
-  }));
+  return (data ?? []).map(
+    (p: { order_id: string; method: ParteBanco["method"]; amount: number | string }) => ({
+      order_id: p.order_id,
+      method: p.method,
+      amount: Number(p.amount ?? 0),
+    }),
+  );
 }
-
-
 
 /** Comandas em aberto, com itens, para o painel lateral do PDV. */
 export const listarComandas = createServerFn({ method: "GET" })
@@ -68,8 +68,9 @@ export const listarComandas = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("orders")
       .select(
-        "id, label, total, opened_at, order_items(id, product_id, product_name, unit_price, quantity)",
+        "id, label, total, opened_at, order_items(id, product_id, product_name, unit_price, quantity, created_at, updated_at)",
       )
+
       .eq("status", "open")
       .order("opened_at", { ascending: true });
     if (error) throw new Error(error.message);
@@ -83,20 +84,27 @@ export const resumoCaixa = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) =>
     z
       .object({
-        dia: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        de: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        ate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        dia: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        de: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        ate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional(),
+        /** fuso da loja: o servidor roda em UTC e viraria o dia às 21h */
+        offsetMin: z.number().int().min(-900).max(900).default(0),
       })
       .parse(input ?? {}),
   )
   .handler(async ({ data, context }) => {
-    const primeiro = data.dia ?? data.de;
-    const ultimo = data.dia ?? data.ate ?? primeiro;
-    const inicio = new Date(primeiro ? `${primeiro}T00:00:00` : new Date());
-    inicio.setHours(0, 0, 0, 0);
-    const fim = new Date(ultimo ? `${ultimo}T00:00:00` : inicio);
-    fim.setHours(0, 0, 0, 0);
-    fim.setDate(fim.getDate() + 1);
+    const faixa = faixaDaLoja(data.dia ?? data.de, data.dia ?? data.ate, data.offsetMin);
+    const inicio = new Date(faixa.inicio);
+    const fim = new Date(faixa.fim);
 
     const [pagos, abertos, saidas] = await Promise.all([
       context.supabase
@@ -117,16 +125,19 @@ export const resumoCaixa = createServerFn({ method: "GET" })
     if (saidas.error) throw new Error(saidas.error.message);
 
     const linhasPagas = (pagos.data ?? []) as PedidoBase[];
-    const partes = await partesDe(context.supabase as never, linhasPagas.map((o) => o.id));
+    const partes = await partesDe(
+      context.supabase as never,
+      linhasPagas.map((o) => o.id),
+    );
     const formas = somarFormas(linhasPagas, partes);
 
-    let entradas = 0;
     let descontos = 0;
     for (const o of pagos.data ?? []) {
-      entradas += Number(o.total ?? 0);
       descontos += Number(o.discount ?? 0);
     }
-
+    /* "Entrou" sai da mesma soma das formas: os cartões do fechamento
+       precisam fechar exatamente com o total, inclusive em conta dividida. */
+    const entradas = Object.values(formas).reduce((s, v) => s + v, 0);
 
     const porCategoria: Record<string, number> = {};
     let totalSaidas = 0;
@@ -162,20 +173,13 @@ export const resumoCaixa = createServerFn({ method: "GET" })
     };
   });
 
-
 /** Cria ou atualiza um pedido (venda direta ou comanda) com seus itens. */
 export const salvarPedido = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => pedidoSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { data: perfil, error: erroPerfil } = await supabase
-      .from("profiles")
-      .select("tenant_id")
-      .eq("id", userId)
-      .maybeSingle();
-    if (erroPerfil) throw new Error(erroPerfil.message);
-    if (!perfil) throw new Error("Perfil da loja não encontrado.");
+    const tenant = await tenantDoUsuario(context);
 
     /* Reenvio da fila offline: se essa operação já entrou, devolve o que existe
        em vez de gravar de novo. */
@@ -190,11 +194,10 @@ export const salvarPedido = createServerFn({ method: "POST" })
       }
     }
 
-
-
-    const bruto = Math.round(data.items.reduce((s, i) => s + i.unit_price * i.quantity, 0) * 100) / 100;
-    const desconto = Math.min(data.discount ?? 0, bruto);
-    const total = Math.round((bruto - desconto) * 100) / 100;
+    const bruto =
+      Math.round(data.items.reduce((s, i) => s + i.unit_price * i.quantity, 0) * 100) / 100;
+    let desconto = Math.min(data.discount ?? 0, bruto);
+    let total = Math.round((bruto - desconto) * 100) / 100;
 
     /* Partes do pagamento: o que veio da tela manda; sem detalhamento,
        a venda inteira cai na forma escolhida. */
@@ -207,17 +210,20 @@ export const salvarPedido = createServerFn({ method: "POST" })
     }
     if (!pago) partes = [];
 
-    const resto = Math.round((total - partes.reduce((s, p) => s + p.amount, 0)) * 100) / 100;
-    if (pago && Math.abs(resto) >= 0.01 && partes.length) {
-      /* Sobrou ou faltou centavo: ajusta na última parte para o caixa fechar. */
-      const ultima = partes[partes.length - 1]!;
-      ultima.amount = Math.round((ultima.amount + resto) * 100) / 100;
+    /* O que entrou de verdade é o que a venda vale: valor a menos vira
+       desconto, valor a mais fica registrado como acréscimo (total > itens). */
+    if (pago && partes.length) {
+      const somaPartes = Math.round(partes.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+      if (Math.abs(somaPartes - total) >= 0.01) {
+        total = somaPartes;
+        desconto = Math.max(0, Math.round((bruto - total) * 100) / 100);
+      }
     }
 
     const complemento = partes.slice(1).reduce((s, p) => s + p.amount, 0);
     const fechadoEm = new Date().toISOString();
     const base = {
-      tenant_id: perfil.tenant_id,
+      tenant_id: tenant,
       label: data.label,
       status: data.status,
       payment_method: pago ? (partes[0]?.method ?? data.payment_method ?? "cash") : null,
@@ -229,8 +235,6 @@ export const salvarPedido = createServerFn({ method: "POST" })
       created_by: userId,
       client_op_id: data.client_op_id ?? null,
     };
-
-
 
     let orderId = data.id;
     if (orderId) {
@@ -258,7 +262,7 @@ export const salvarPedido = createServerFn({ method: "POST" })
 
     const { error: erroItens } = await supabase.from("order_items").insert(
       data.items.map((i) => ({
-        tenant_id: perfil.tenant_id,
+        tenant_id: tenant,
         order_id: orderId!,
         product_id: i.product_id ?? null,
         product_name: i.product_name,
@@ -272,7 +276,7 @@ export const salvarPedido = createServerFn({ method: "POST" })
     if (partes.length) {
       const { error: erroPag } = await supabase.from("order_payments").insert(
         partes.map((p) => ({
-          tenant_id: perfil.tenant_id,
+          tenant_id: tenant,
           order_id: orderId!,
           method: p.method,
           amount: p.amount,
@@ -375,7 +379,13 @@ export const reciboDaVenda = createServerFn({ method: "GET" })
 export const listarVendas = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
-    z.object({ de: z.string(), ate: z.string(), limite: z.number().int().min(1).max(200).default(50) }).parse(input),
+    z
+      .object({
+        de: z.string(),
+        ate: z.string(),
+        limite: z.number().int().min(1).max(200).default(50),
+      })
+      .parse(input),
   )
   .handler(async ({ data, context }) => {
     const { data: linhas, error } = await context.supabase
@@ -395,7 +405,6 @@ export const listarVendas = createServerFn({ method: "GET" })
       payment_method: o.payment_method,
     }));
   });
-
 
 /** Cancela (descarta) uma comanda em aberto. */
 export const cancelarComanda = createServerFn({ method: "POST" })
@@ -417,12 +426,7 @@ export const adicionarItens = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => itensSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { data: perfil } = await supabase
-      .from("profiles")
-      .select("tenant_id")
-      .eq("id", userId)
-      .maybeSingle();
-    if (!perfil) throw new Error("Perfil da loja não encontrado.");
+    const tenant = await tenantDoUsuario(context);
 
     /* Lote já lançado por esta mesma operação: não soma duas vezes. */
     if (data.client_op_id) {
@@ -452,7 +456,7 @@ export const adicionarItens = createServerFn({ method: "POST" })
 
     const { error: erroItens } = await supabase.from("order_items").insert(
       data.items.map((i, k) => ({
-        tenant_id: perfil.tenant_id,
+        tenant_id: tenant,
         order_id: data.order_id,
         product_id: i.product_id ?? null,
         product_name: i.product_name,
@@ -461,7 +465,6 @@ export const adicionarItens = createServerFn({ method: "POST" })
         subtotal: i.unit_price * i.quantity,
         client_op_id: data.client_op_id ? `${data.client_op_id}#${k}` : null,
       })),
-
     );
     if (erroItens) throw new Error(erroItens.message);
 
@@ -477,4 +480,111 @@ export const adicionarItens = createServerFn({ method: "POST" })
     const { error } = await supabase.from("orders").update({ total }).eq("id", data.order_id);
     if (error) throw new Error(error.message);
     return { id: data.order_id, total };
+  });
+
+/** Nomes de conta já usados na loja — alimenta as sugestões de "de quem é essa
+ *  conta". Ordenados pelos mais frequentes, para o nome certo vir primeiro. */
+export const nomesClientes = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const desde = new Date();
+    desde.setDate(desde.getDate() - 90);
+    const { data, error } = await context.supabase
+      .from("orders")
+      .select("label")
+      .gte("opened_at", desde.toISOString())
+      .order("opened_at", { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    const contagem = new Map<string, number>();
+    for (const o of data ?? []) {
+      const nome = (o.label ?? "").trim();
+      if (!nome) continue;
+      contagem.set(nome, (contagem.get(nome) ?? 0) + 1);
+    }
+    return [...contagem.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 200)
+      .map(([nome]) => nome);
+  });
+
+/** Recalcula o total de uma conta a partir dos itens que estão no banco.
+ *  Fonte única de verdade: a soma manda, o total só reflete. */
+async function recalcular(
+  supabase: { from: (t: "order_items" | "orders") => any },
+  orderId: string,
+  desconto: number,
+) {
+  const { data: todos, error } = await supabase
+    .from("order_items")
+    .select("subtotal")
+    .eq("order_id", orderId);
+  if (error) throw new Error(error.message);
+  const bruto = (todos ?? []).reduce(
+    (s: number, i: { subtotal: number | string | null }) => s + Number(i.subtotal ?? 0),
+    0,
+  );
+  const total = Math.max(0, Math.round((bruto - desconto) * 100) / 100);
+  const { error: erroTotal } = await supabase.from("orders").update({ total }).eq("id", orderId);
+  if (erroTotal) throw new Error(erroTotal.message);
+  return total;
+}
+
+/** Item de uma conta aberta, com a conta a que ele pertence. */
+async function itemAberto(supabase: { from: (t: any) => any }, itemId: string) {
+  const { data: item, error } = await supabase
+    .from("order_items")
+    .select("id, order_id, unit_price, quantity, orders(status, discount)")
+    .eq("id", itemId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!item) throw new Error("Esse item não existe mais.");
+  const conta = (item as any).orders as { status: string; discount: number | string } | null;
+  if (conta && conta.status !== "open") throw new Error("Essa conta já foi fechada.");
+  return {
+    id: item.id as string,
+    order_id: item.order_id as string,
+    unit_price: Number(item.unit_price ?? 0),
+    quantity: Number(item.quantity ?? 0),
+    desconto: Number(conta?.discount ?? 0),
+  };
+}
+
+/** Muda a quantidade (e, se quiser, o preço) de um item de conta aberta. */
+export const atualizarItemComanda = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        item_id: z.string().uuid(),
+        quantity: z.number().min(0.001).max(9999),
+        unit_price: z.number().min(0).max(999999).optional(),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const item = await itemAberto(supabase as never, data.item_id);
+    const preco = data.unit_price ?? item.unit_price;
+    const subtotal = Math.round(preco * data.quantity * 100) / 100;
+    const { error } = await supabase
+      .from("order_items")
+      .update({ quantity: data.quantity, unit_price: preco, subtotal })
+      .eq("id", item.id);
+    if (error) throw new Error(error.message);
+    const total = await recalcular(supabase as never, item.order_id, item.desconto);
+    return { order_id: item.order_id, total };
+  });
+
+/** Apaga um item de conta aberta. A conta continua aberta, mesmo ficando vazia. */
+export const removerItemComanda = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ item_id: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { supabase } = context;
+    const item = await itemAberto(supabase as never, data.item_id);
+    const { error } = await supabase.from("order_items").delete().eq("id", item.id);
+    if (error) throw new Error(error.message);
+    const total = await recalcular(supabase as never, item.order_id, item.desconto);
+    return { order_id: item.order_id, total };
   });

@@ -123,7 +123,14 @@ export function FolhaRecibo({
             <Linha rotulo="Subtotal" valor={dados.bruto} />
             <Linha rotulo="Desconto" valor={-dados.desconto} />
           </>
+        ) : dados.total > dados.bruto + 0.005 ? (
+          /* Pagou mais do que os produtos: o papel mostra de onde veio a sobra. */
+          <>
+            <Linha rotulo="Subtotal" valor={dados.bruto} />
+            <Linha rotulo="Acréscimo" valor={Math.round((dados.total - dados.bruto) * 100) / 100} />
+          </>
         ) : null}
+
         <div className="flex justify-between pt-1 text-base font-black">
           <span>TOTAL</span>
           <span>R$ {brl(dados.total)}</span>

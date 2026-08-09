@@ -16,6 +16,7 @@ import { enviar } from "@/lib/offline";
 
 import { cn } from "@/lib/utils";
 import { AvisoErro } from "@/components/aviso-erro";
+import { Dica } from "@/components/dica";
 
 export const Route = createFileRoute("/_authenticated/saidas")({
   head: () => ({
@@ -52,19 +53,21 @@ function SaidasPage() {
   const hojeIso = diaIso(new Date());
   const rotulo = rotuloIntervalo(periodo).toLowerCase();
 
-  /* A lista de categorias é da loja: se a dona apagar a escolhida, cai na primeira. */
+  /* Categoria é opcional: nada vem marcado e clicar de novo desmarca. */
   useEffect(() => {
-    if (categorias.length && !categorias.includes(cat)) setCat(categorias[0] ?? "");
+    if (cat && !categorias.includes(cat)) setCat("");
   }, [categorias, cat]);
 
   const queryClient = useQueryClient();
+  /* Dia da loja, não do servidor: sem o fuso, lançamento da noite pula de dia. */
+  const offsetMin = useMemo(() => new Date().getTimezoneOffset(), []);
   const confirmar = useConfirmar();
   const buscarSaidas = useServerFn(listarSaidas);
   const apagar = useServerFn(excluirSaida);
 
   const saidasQuery = useQuery({
-    queryKey: ["saidas", periodo.de, periodo.ate],
-    queryFn: () => buscarSaidas({ data: { de: periodo.de, ate: periodo.ate } }),
+    queryKey: ["saidas", periodo.de, periodo.ate, offsetMin],
+    queryFn: () => buscarSaidas({ data: { de: periodo.de, ate: periodo.ate, offsetMin } }),
   });
 
   const recarregar = () => {
@@ -83,14 +86,34 @@ function SaidasPage() {
         },
         `a saída "${v.description}"`,
       ),
+    /* A saída entra na lista na hora; se o banco recusar, ela sai de volta. */
+    onMutate: async (v) => {
+      const chave = ["saidas", periodo.de, periodo.ate, offsetMin];
+      await queryClient.cancelQueries({ queryKey: chave });
+      const antes = queryClient.getQueryData(chave);
+      queryClient.setQueryData(chave, (lista: typeof saidas | undefined) => [
+        {
+          id: `tmp-${Date.now()}`,
+          description: v.description,
+          amount: v.amount,
+          category: v.category || "Sem categoria",
+          occurred_at: new Date().toISOString(),
+        },
+        ...(lista ?? []),
+      ]);
+      descRef.current?.focus();
+      return { antes, chave };
+    },
     onSuccess: (envio) => {
       recarregar();
       if (envio.offline) toast.warning("Sem internet: saída guardada no aparelho.");
       descRef.current?.focus();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error, _v, ctx) => {
+      if (ctx) queryClient.setQueryData(ctx.chave, ctx.antes);
+      toast.error(e.message);
+    },
   });
-
 
   const remover = useMutation({
     mutationFn: (id: string) => apagar({ data: { id } }),
@@ -184,11 +207,16 @@ function SaidasPage() {
                 Nenhuma categoria configurada — a saída vai sem categoria. Monte a sua lista no
                 Admin.
               </p>
-            ) : null}
+            ) : (
+              <span className="flex items-center gap-1 self-center text-xs font-bold text-muted-foreground">
+                Categoria (opcional)
+                <Dica texto="Serve só para o relatório saber para onde o dinheiro foi. Pode lançar sem escolher — e clicar de novo na categoria marcada desmarca." />
+              </span>
+            )}
             {categorias.map((c) => (
               <button
                 key={c}
-                onClick={() => setCat(c)}
+                onClick={() => setCat((atual) => (atual === c ? "" : c))}
                 className={cn(
                   "press rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors",
                   cat === c
@@ -223,7 +251,9 @@ function SaidasPage() {
         <div className="mt-4 rounded-2xl border border-border bg-card p-5">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-display text-xl tracking-wide">Onde o dinheiro saiu</h2>
-            <span className="money text-2xl leading-none text-danger">− R$ {brl(totalAnimado)}</span>
+            <span className="money text-2xl leading-none text-danger">
+              − R$ {brl(totalAnimado)}
+            </span>
           </div>
           {porCategoria.length === 0 ? (
             <p className="mt-4 text-sm text-muted-foreground">
@@ -256,10 +286,13 @@ function SaidasPage() {
         </div>
 
         <section className="mt-4 rounded-2xl border border-border bg-card">
-          <h2 className="border-b border-border px-5 py-3 font-display text-xl tracking-wide">
-            Lançamentos · {rotulo}
+          <h2 className="flex items-baseline justify-between gap-3 border-b border-border px-5 py-3 font-display text-xl tracking-wide">
+            <span>Lançamentos · {rotulo}</span>
+            <span className="text-xs font-bold tracking-normal text-muted-foreground">
+              {saidas.length} {saidas.length === 1 ? "lançamento" : "lançamentos"}
+            </span>
           </h2>
-          <ul>
+          <ul className="max-h-[24rem] overflow-y-auto overscroll-contain">
             {saidasQuery.isError ? (
               <li className="px-5 py-5">
                 <AvisoErro erro={saidasQuery.error} aoTentar={() => saidasQuery.refetch()} />
@@ -284,9 +317,7 @@ function SaidasPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
-                    <p className="money text-2xl leading-none text-danger">
-                      − R$ {brl(s.amount)}
-                    </p>
+                    <p className="money text-2xl leading-none text-danger">− R$ {brl(s.amount)}</p>
                     <button
                       onClick={async () => {
                         const ok = await confirmar({

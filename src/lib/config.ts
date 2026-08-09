@@ -32,6 +32,8 @@ export type Config = {
   logoUrl: string;
   /** categorias de saída que a loja realmente usa */
   categoriasSaida: string[];
+  /** categorias do cardápio: as abas da tela de vendas */
+  categoriasProduto: string[];
   /** cronômetro das comandas ligado? quem não corre contra o tempo desliga */
   cronometroAtivo: boolean;
   /** como o papel do recibo é montado */
@@ -108,6 +110,7 @@ export const configPadrao: Config = {
   endereco: "",
   logoUrl: "",
   categoriasSaida: ["Insumos", "Embalagem", "Manutenção", "Retirada", "Outros"],
+  categoriasProduto: [],
   cronometroAtivo: true,
   recibo: reciboPadrao,
 };
@@ -128,6 +131,7 @@ export type LinhaLoja = {
   address?: string | null;
   logo_url?: string | null;
   categorias_saida?: string[] | null;
+  categorias_produto?: string[] | null;
   cronometro_ativo?: boolean | null;
   recibo_config?: unknown;
 };
@@ -150,6 +154,7 @@ export function configDaLinha(linha: LinhaLoja | null | undefined): Partial<Conf
   if (linha.address != null) p.endereco = linha.address;
   if (linha.logo_url != null) p.logoUrl = linha.logo_url;
   if (linha.categorias_saida) p.categoriasSaida = linha.categorias_saida;
+  if (linha.categorias_produto) p.categoriasProduto = linha.categorias_produto;
   if (linha.cronometro_ativo != null) p.cronometroAtivo = linha.cronometro_ativo;
   if (linha.recibo_config && typeof linha.recibo_config === "object") {
     p.recibo = { ...reciboPadrao, ...(linha.recibo_config as Partial<ReciboConfig>) };
@@ -174,6 +179,7 @@ export function linhaDaConfig(patch: Partial<Config>): Record<string, unknown> {
   if (patch.endereco !== undefined) l.address = patch.endereco;
   if (patch.logoUrl !== undefined) l.logo_url = patch.logoUrl;
   if (patch.categoriasSaida !== undefined) l.categorias_saida = patch.categoriasSaida;
+  if (patch.categoriasProduto !== undefined) l.categorias_produto = patch.categoriasProduto;
   if (patch.cronometroAtivo !== undefined) l.cronometro_ativo = patch.cronometroAtivo;
   if (patch.recibo !== undefined) l.recibo_config = patch.recibo;
   return l;

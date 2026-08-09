@@ -9,7 +9,9 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Scale,
   Store,
+  Tag,
   Tags,
   Trash2,
   X,
@@ -28,9 +30,11 @@ import {
   excluirProduto,
   listarProdutos,
   obterLoja,
+  renomearCategoria,
   salvarLoja,
   salvarProduto,
 } from "@/lib/loja.functions";
+import type { ModoPreco } from "@/components/pdv/comum";
 import { cn } from "@/lib/utils";
 import { AvisoErro } from "@/components/aviso-erro";
 
@@ -58,6 +62,15 @@ export const Route = createFileRoute("/_authenticated/admin")({
 
 const exemplos = [3, 10, 20];
 
+/** Sabor enquanto está sendo digitado: os valores ficam como texto para a
+ *  vírgula não sumir a cada tecla. Viram número só na hora de salvar. */
+type SaborRascunho = {
+  nome: string;
+  preco: string;
+  modo: Exclude<ModoPreco, "flavor">;
+  precoKg: string;
+};
+
 type Rascunho = {
   id?: string;
   name: string;
@@ -67,6 +80,9 @@ type Rascunho = {
   price: string;
   active: boolean;
   image_url: string;
+  modo: ModoPreco;
+  precoKg: string;
+  sabores: SaborRascunho[];
 };
 
 const rascunhoVazio: Rascunho = {
@@ -77,7 +93,40 @@ const rascunhoVazio: Rascunho = {
   price: "",
   active: true,
   image_url: "",
+  modo: "fixed",
+  precoKg: "",
+  sabores: [],
 };
+
+/** As quatro formas de o preço nascer, explicadas em uma frase cada. */
+const modosPreco: { valor: ModoPreco; titulo: string; frase: string; icone: typeof Tag }[] = [
+  {
+    valor: "fixed",
+    titulo: "Preço fixo",
+    frase: "Sempre o mesmo valor.",
+    icone: Tag,
+  },
+  {
+    valor: "flavor",
+    titulo: "Preço por sabor",
+    frase: "Cada sabor tem seu preço.",
+    icone: IceCream,
+  },
+  {
+    valor: "manual",
+    titulo: "Preço na hora",
+    frase: "O caixa digita o valor.",
+    icone: Pencil,
+  },
+  {
+    valor: "weight",
+    titulo: "Vendido por peso",
+    frase: "Preço do quilo × gramas.",
+    icone: Scale,
+  },
+];
+
+const num = (v: string) => Number(String(v).replace(",", ".")) || 0;
 
 const campo =
   "mt-1.5 h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-4 text-base font-normal outline-none transition-colors focus:border-primary focus:bg-card";
@@ -108,6 +157,9 @@ function AdminPage() {
   const [editandoLoja, setEditandoLoja] = useState(false);
   const [editandoTempos, setEditandoTempos] = useState(false);
   const [novaCategoria, setNovaCategoria] = useState("");
+  /* Categorias do cardápio: criar em qualquer lugar, gerenciar num lugar só. */
+  const [criandoCategoria, setCriandoCategoria] = useState<string | null>(null);
+  const [renomeando, setRenomeando] = useState<{ de: string; para: string } | null>(null);
 
   const [dadosLoja, setDadosLoja] = useState({
     store_name: "",
@@ -139,9 +191,19 @@ function AdminPage() {
             .split(/[,\s]+/)
             .map((t) => t.trim().toLowerCase())
             .filter(Boolean),
-          price: Number(r.price.replace(",", ".")) || 0,
+          price: r.modo === "fixed" || r.modo === "manual" ? num(r.price) : 0,
           active: r.active,
           image_url: r.image_url || null,
+          pricing_mode: r.modo,
+          price_per_kg: num(r.precoKg),
+          variants: r.sabores
+            .filter((v) => v.nome.trim())
+            .map((v) => ({
+              nome: v.nome.trim(),
+              preco: v.modo === "weight" ? 0 : num(v.preco),
+              modo: v.modo,
+              precoKg: v.modo === "weight" ? num(v.precoKg) : 0,
+            })),
         },
       }),
     onSuccess: () => {
@@ -156,6 +218,19 @@ function AdminPage() {
     mutationFn: (id: string) => mutExcluir({ data: { id } }),
     onSuccess: () => {
       toast.success("Produto removido");
+      qc.invalidateQueries({ queryKey: ["produtos"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const renomear = useMutation({
+    mutationFn: (v: { de: string; para: string }) => renomearCategoria({ data: v }),
+    onSuccess: (_d, v) => {
+      toast.success("Categoria renomeada");
+      setRenomeando(null);
+      setConfig({
+        categoriasProduto: config.categoriasProduto.map((c) => (c === v.de ? v.para : c)),
+      });
       qc.invalidateQueries({ queryKey: ["produtos"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -180,6 +255,24 @@ function AdminPage() {
     }
     return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [lista]);
+
+  /* A lista real é a união do que foi cadastrado com o que os produtos já usam. */
+  const categoriasCardapio = useMemo(() => {
+    const set = new Set<string>(config.categoriasProduto);
+    for (const p of lista) if (p.category?.trim()) set.add(p.category.trim());
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [config.categoriasProduto, lista]);
+
+  const criarCategoria = (nome: string): string | null => {
+    const n = nome.trim();
+    if (!n) return null;
+    if (categoriasCardapio.some((c) => c.toLowerCase() === n.toLowerCase())) {
+      toast.error("Essa categoria já existe");
+      return null;
+    }
+    setConfig({ categoriasProduto: [...config.categoriasProduto, n] });
+    return n;
+  };
 
   const adicionarCategoria = () => {
     const nome = novaCategoria.trim();
@@ -290,6 +383,25 @@ function AdminPage() {
                                     price: String(p.price),
                                     active: p.active,
                                     image_url: p.image_url ?? "",
+                                    modo: (p.pricing_mode ?? "fixed") as ModoPreco,
+                                    precoKg: String(p.price_per_kg ?? 0),
+                                    sabores: Array.isArray(p.variants)
+                                      ? (
+                                          p.variants as {
+                                            nome?: string;
+                                            preco?: number;
+                                            modo?: string;
+                                            precoKg?: number;
+                                          }[]
+                                        ).map((v) => ({
+                                          nome: String(v?.nome ?? ""),
+                                          preco: v?.preco ? brl(Number(v.preco)) : "",
+                                          modo: (v?.modo === "manual" || v?.modo === "weight"
+                                            ? v.modo
+                                            : "fixed") as Exclude<ModoPreco, "flavor">,
+                                          precoKg: v?.precoKg ? brl(Number(v.precoKg)) : "",
+                                        }))
+                                      : [],
                                   })
                                 }
                                 className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
@@ -348,6 +460,75 @@ function AdminPage() {
             </section>
 
             <CartaoRecibo />
+
+            {/* Categorias do cardápio: um lugar só para criar, renomear e remover. */}
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                <Tags className="size-4" />
+                Categorias do cardápio
+              </span>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Organizam as abas da tela de vendas.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {categoriasCardapio.length === 0 ? (
+                  <li className="text-xs text-muted-foreground">
+                    Nenhuma categoria — os produtos ficam em “Sem categoria”.
+                  </li>
+                ) : null}
+                {categoriasCardapio.map((c) => {
+                  const usados = lista.filter((p) => (p.category?.trim() || "") === c).length;
+                  return (
+                    <li
+                      key={c}
+                      className="flex items-center gap-2 rounded-xl border border-border bg-secondary/30 py-2 pl-3 pr-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold">{c}</span>
+                      <span className="shrink-0 text-[0.6875rem] font-bold tabular-nums text-muted-foreground/70">
+                        {usados}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Renomear categoria ${c}`}
+                        onClick={() => setRenomeando({ de: c, para: c })}
+                        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                      >
+                        <Pencil className="size-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remover categoria ${c}`}
+                        onClick={async () => {
+                          const ok = await confirmar({
+                            titulo: `Remover a categoria "${c}"?`,
+                            descricao: usados
+                              ? `${usados} produto(s) ficarão sem categoria.`
+                              : "Ela some das abas da tela de vendas.",
+                            confirmar: "Remover",
+                          });
+                          if (!ok) return;
+                          setConfig({
+                            categoriasProduto: config.categoriasProduto.filter((x) => x !== c),
+                          });
+                          if (usados) renomear.mutate({ de: c, para: "" });
+                        }}
+                        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <button
+                type="button"
+                onClick={() => setCriandoCategoria("")}
+                className="press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
+              >
+                <Plus className="size-4" />
+                Nova categoria
+              </button>
+            </section>
 
             {/* Categorias de saída: cada loja gasta com o que gasta. */}
             <section className="rounded-2xl border border-border bg-card p-5">
@@ -510,28 +691,226 @@ function AdminPage() {
             </label>
 
             <label className="text-sm font-bold">
-              Preço (R$)
-              <input
-                inputMode="decimal"
-                value={rascunho.price}
-                onChange={(e) => setRascunho({ ...rascunho, price: moeda(e.target.value) })}
-                className={cn(campo, "money")}
-              />
-            </label>
-            <label className="text-sm font-bold">
               Categoria
-              <input
-                list="categorias-produto"
+              <select
                 value={rascunho.category}
-                onChange={(e) => setRascunho({ ...rascunho, category: texto(e.target.value, 40) })}
+                onChange={(e) => {
+                  if (e.target.value === "__nova") return setCriandoCategoria("");
+                  setRascunho({ ...rascunho, category: e.target.value });
+                }}
                 className={campo}
-              />
-              <datalist id="categorias-produto">
-                {grupos.map(([g]) => (
-                  <option key={g} value={g} />
+              >
+                <option value="">Sem categoria</option>
+                {categoriasCardapio.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
                 ))}
-              </datalist>
+                <option value="__nova">+ Nova categoria…</option>
+              </select>
             </label>
+
+            {/* Como o preço nasce: a escolha muda os campos logo abaixo. */}
+            <div className="sm:col-span-2">
+              <span className="text-sm font-bold">Como é o preço deste produto?</span>
+              <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                {modosPreco.map((m) => {
+                  const Icone = m.icone;
+                  const ativo = rascunho.modo === m.valor;
+                  return (
+                    <button
+                      key={m.valor}
+                      type="button"
+                      aria-pressed={ativo}
+                      onClick={() => setRascunho({ ...rascunho, modo: m.valor })}
+                      className={cn(
+                        "press flex items-center gap-3 rounded-xl border-2 p-3 text-left transition-colors",
+                        ativo
+                          ? "border-primary bg-primary-soft"
+                          : "border-border bg-card hover:border-primary/50",
+                      )}
+                    >
+                      <Icone
+                        className={cn("size-6 shrink-0", ativo ? "text-primary" : "text-muted-foreground")}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-black">{m.titulo}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {m.frase}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {rascunho.modo === "fixed" || rascunho.modo === "manual" ? (
+              <label className="text-sm font-bold sm:col-span-2">
+                {rascunho.modo === "manual" ? "Preço sugerido (R$) — opcional" : "Preço (R$)"}
+                <input
+                  inputMode="decimal"
+                  value={rascunho.price}
+                  onChange={(e) => setRascunho({ ...rascunho, price: moeda(e.target.value) })}
+                  className={cn(campo, "money")}
+                />
+              </label>
+            ) : null}
+
+            {rascunho.modo === "weight" ? (
+              <label className="text-sm font-bold sm:col-span-2">
+                Preço por quilo (R$)
+                <input
+                  inputMode="decimal"
+                  value={rascunho.precoKg}
+                  onChange={(e) => setRascunho({ ...rascunho, precoKg: moeda(e.target.value) })}
+                  placeholder="Ex.: 79,90"
+                  className={cn(campo, "money")}
+                />
+                <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                  Na venda o caixa digita os gramas e o valor sai sozinho.
+                </span>
+              </label>
+            ) : null}
+
+            {rascunho.modo === "flavor" ? (
+              <div className="sm:col-span-2">
+                <span className="text-sm font-bold">Sabores e preços</span>
+                {rascunho.sabores.length === 0 ? (
+                  <p className="mt-1.5 rounded-xl border-2 border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+                    Nenhum sabor cadastrado — adicione o primeiro.
+                  </p>
+                ) : (
+                  <ul className="mt-1.5 space-y-2">
+                    {rascunho.sabores.map((v, i) => (
+                      <li
+                        key={i}
+                        className="grid grid-cols-[auto_minmax(0,1fr)_9rem_auto] items-center gap-2"
+                      >
+                        <button
+                          type="button"
+                          aria-label={`Como cobrar o sabor ${v.nome || i + 1}`}
+                          title={
+                            v.modo === "manual"
+                              ? "Preço digitado na hora — tocar para mudar"
+                              : v.modo === "weight"
+                                ? "Vendido por peso — tocar para mudar"
+                                : "Preço fixo — tocar para mudar"
+                          }
+                          onClick={() => {
+                            const ordem = ["fixed", "manual", "weight"] as const;
+                            const prox = ordem[(ordem.indexOf(v.modo) + 1) % ordem.length]!;
+                            const sabores = [...rascunho.sabores];
+                            sabores[i] = { ...v, modo: prox };
+                            setRascunho({ ...rascunho, sabores });
+                          }}
+                          className="press grid size-12 place-items-center rounded-xl border-2 border-border bg-secondary/30 text-primary hover:border-primary"
+                        >
+                          {v.modo === "manual" ? (
+                            <Pencil className="size-5" />
+                          ) : v.modo === "weight" ? (
+                            <Scale className="size-5" />
+                          ) : (
+                            <Tag className="size-5" />
+                          )}
+                        </button>
+                        <input
+                          value={v.nome}
+                          placeholder="Nome do sabor"
+                          autoFocus={i === rascunho.sabores.length - 1 && !v.nome && !v.preco}
+                          onChange={(e) => {
+                            const sabores = [...rascunho.sabores];
+                            sabores[i] = { ...v, nome: texto(e.target.value, 40) };
+                            setRascunho({ ...rascunho, sabores });
+                          }}
+                          className="h-12 min-w-0 rounded-xl border-2 border-border bg-secondary/30 px-3 text-sm outline-none focus:border-primary"
+                        />
+                        {v.modo === "manual" ? (
+                          <span className="px-1 text-xs leading-tight text-muted-foreground">
+                            valor digitado na venda
+                          </span>
+                        ) : v.modo === "weight" ? (
+                          <span className="flex h-12 items-center gap-1 rounded-xl border-2 border-border bg-secondary/30 pr-2">
+                            <input
+                              inputMode="decimal"
+                              value={v.precoKg}
+                              placeholder="0,00"
+                              onChange={(e) => {
+                                const sabores = [...rascunho.sabores];
+                                sabores[i] = { ...v, precoKg: moeda(e.target.value) };
+                                setRascunho({ ...rascunho, sabores });
+                              }}
+                              className="money h-full min-w-0 flex-1 rounded-xl bg-transparent px-3 text-base outline-none"
+                            />
+                            <span className="shrink-0 text-xs text-muted-foreground">/kg</span>
+                          </span>
+                        ) : (
+                          <input
+                            inputMode="decimal"
+                            value={v.preco}
+                            placeholder="0,00"
+                            onChange={(e) => {
+                              const sabores = [...rascunho.sabores];
+                              sabores[i] = { ...v, preco: moeda(e.target.value) };
+                              setRascunho({ ...rascunho, sabores });
+                            }}
+                            className="money h-12 min-w-0 rounded-xl border-2 border-border bg-secondary/30 px-3 text-base outline-none focus:border-primary"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          aria-label={`Remover sabor ${v.nome || i + 1}`}
+                          onClick={async () => {
+                            const ok = await confirmar({
+                              titulo: `Remover o sabor "${v.nome || "sem nome"}"?`,
+                              descricao: "Ele deixa de aparecer na hora da venda.",
+                              confirmar: "Remover",
+                            });
+                            if (!ok) return;
+                            setRascunho({
+                              ...rascunho,
+                              sabores: rascunho.sabores.filter((_, j) => j !== i),
+                            });
+                          }}
+                          className="grid size-12 place-items-center rounded-xl text-danger hover:bg-danger-soft"
+                        >
+                          <Trash2 className="size-5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <Tag className="size-3.5" /> preço fixo
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Pencil className="size-3.5" /> digitado na venda
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Scale className="size-3.5" /> por peso
+                  </span>
+                  <span>— toque no ícone para alternar.</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRascunho({
+                      ...rascunho,
+                      sabores: [
+                        ...rascunho.sabores,
+                        { nome: "", preco: "", modo: "fixed", precoKg: "" },
+                      ],
+                    })
+                  }
+                  className="press mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
+                >
+                  <Plus className="size-4" />
+                  Adicionar sabor
+                </button>
+
+              </div>
+            ) : null}
             <label className="text-sm font-bold">
               Tags (separadas por vírgula)
               <input
@@ -684,6 +1063,61 @@ function AdminPage() {
           </div>
         </Modal>
       ) : null}
+      {criandoCategoria !== null ? (
+        <Modal
+          titulo="Nova categoria"
+          subtitulo="Uma pergunta só: como ela se chama?"
+          onFechar={() => setCriandoCategoria(null)}
+          rodape={
+            <button
+              type="button"
+              onClick={() => {
+                const n = criarCategoria(criandoCategoria);
+                if (!n) return;
+                if (rascunho) setRascunho({ ...rascunho, category: n });
+                setCriandoCategoria(null);
+              }}
+              className="press h-12 rounded-xl bg-primary px-6 font-bold text-primary-foreground"
+            >
+              Criar categoria
+            </button>
+          }
+        >
+          <input
+            autoFocus
+            value={criandoCategoria}
+            onChange={(e) => setCriandoCategoria(texto(e.target.value, 40))}
+            placeholder="Ex.: Açaí, Bolos, Bebidas"
+            className={campo}
+          />
+        </Modal>
+      ) : null}
+
+      {renomeando ? (
+        <Modal
+          titulo={`Renomear "${renomeando.de}"`}
+          subtitulo="Todos os produtos dessa categoria passam a usar o nome novo."
+          onFechar={() => setRenomeando(null)}
+          rodape={
+            <button
+              type="button"
+              disabled={renomear.isPending || !renomeando.para.trim()}
+              onClick={() => renomear.mutate({ de: renomeando.de, para: renomeando.para.trim() })}
+              className="press h-12 rounded-xl bg-primary px-6 font-bold text-primary-foreground disabled:opacity-50"
+            >
+              {renomear.isPending ? "Salvando…" : "Salvar nome"}
+            </button>
+          }
+        >
+          <input
+            autoFocus
+            value={renomeando.para}
+            onChange={(e) => setRenomeando({ ...renomeando, para: texto(e.target.value, 40) })}
+            className={campo}
+          />
+        </Modal>
+      ) : null}
+
     </AppShell>
   );
 }

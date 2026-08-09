@@ -21,6 +21,8 @@ import { cancelarComanda, listarComandas } from "@/lib/vendas.functions";
 
 import { norm, type ComandaCard } from "./comum";
 import { EditorSalao } from "./editor-salao";
+import { ModalConta } from "./modal-conta";
+
 
 /**
  * Painel lateral — caixa do dia, salão (se a loja quiser) e contas abertas.
@@ -40,11 +42,15 @@ export function PainelLateral({
   const [config] = useConfig();
   const [editando, setEditando] = useState(false);
   const [aoVivo, setAoVivo] = useState(false);
-  /** valor em aberto escondido: o cliente do outro lado do balcão não lê */
-  const [mostrarValor, setMostrarValor] = useState(false);
+  /** valor em aberto escondido: o cliente do outro lado do balcão não lê.
+   *  Cada conta tem seu próprio olho; o do topo abre/esconde todos. */
+  const [visiveis, setVisiveis] = useState<Set<string>>(() => new Set());
   const [dicaSalao, setDicaSalao] = useState(false);
   /** conta com os itens abertos na lista — dá para ver o que a pessoa pediu */
   const [expandida, setExpandida] = useState<string | null>(null);
+  /** conta aberta no modal de detalhes, para editar item por item */
+  const [detalhe, setDetalhe] = useState<string | null>(null);
+
 
   const [filtro, setFiltro] = useState("");
   const queryClient = useQueryClient();
@@ -54,7 +60,6 @@ export function PainelLateral({
   const descartar = useServerFn(cancelarComanda);
 
   const comandasQuery = useQuery({ queryKey: ["comandas"], queryFn: () => buscarComandas() });
-
 
   const cancelar = useMutation({
     mutationFn: (id: string) => descartar({ data: { id } }),
@@ -89,7 +94,6 @@ export function PainelLateral({
     return () => clearInterval(t);
   }, []);
 
-
   const contas = useMemo(
     () =>
       (comandasQuery.data ?? []).map((c) => ({
@@ -97,12 +101,18 @@ export function PainelLateral({
         label: c.label,
         valor: Number(c.total ?? 0),
         min: Math.max(0, Math.round((agora - new Date(c.opened_at).getTime()) / 60000)),
+        opened_at: c.opened_at,
         itens: (c.order_items ?? []).map((i) => ({
+          id: i.id,
           product_id: i.product_id,
           product_name: i.product_name,
           unit_price: Number(i.unit_price),
           quantity: Number(i.quantity),
+          created_at: i.created_at,
+          updated_at: i.updated_at,
         })),
+
+
       })),
     [agora, comandasQuery.data],
   );
@@ -129,6 +139,21 @@ export function PainelLateral({
   const pendente = contas.reduce((s, c) => s + c.valor, 0);
   const ocupadas = mesas.filter((m) => m.conta).length;
 
+  /* Olho por conta: o valor de uma some sem esconder o resto. */
+  const visivel = (id: string) => visiveis.has(id);
+  const alternar = (id: string) =>
+    setVisiveis((atual) => {
+      const proximo = new Set(atual);
+      if (proximo.has(id)) proximo.delete(id);
+      else proximo.add(id);
+      return proximo;
+    });
+  const todosVisiveis = contas.length > 0 && contas.every((c) => visiveis.has(c.id));
+  const alternarTodos = () =>
+    setVisiveis(todosVisiveis ? new Set() : new Set(contas.map((c) => c.id)));
+
+  const contaDoDetalhe = contas.find((c) => c.id === detalhe) ?? null;
+
   return (
     <>
       {/* Faixa fina: o caixa do dia mora em Caixa. Aqui só o que ainda está na
@@ -147,26 +172,25 @@ export function PainelLateral({
           <span className="flex items-center gap-1.5">
             <span
               className={cn(
-                "money text-2xl leading-none text-warning-foreground",
-                !mostrarValor && "select-none blur-[6px]",
+                "money text-2xl leading-none text-warning-foreground transition-[filter] duration-200",
+                !todosVisiveis && "select-none blur-[6px]",
               )}
-              aria-hidden={!mostrarValor}
+              aria-hidden={!todosVisiveis}
             >
               R$ {brl(pendente)}
             </span>
             <button
               type="button"
-              onClick={() => setMostrarValor((v) => !v)}
-              aria-pressed={mostrarValor}
-              aria-label={mostrarValor ? "Esconder valor em aberto" : "Mostrar valor em aberto"}
+              onClick={alternarTodos}
+              aria-pressed={todosVisiveis}
+              aria-label={todosVisiveis ? "Esconder todos os valores" : "Mostrar todos os valores"}
               className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              {mostrarValor ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              {todosVisiveis ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
           </span>
         ) : null}
       </div>
-
 
 
       {/* Salão é opcional: só aparece se a loja disse que tem. */}
@@ -214,39 +238,73 @@ export function PainelLateral({
             {mesas.map((m, i) => {
               const u = m.conta && config.cronometroAtivo ? urgencia(m.conta.min, config) : null;
               return (
-                <button
-                  key={m.label}
-                  style={{ animationDelay: `${Math.min(i, 10) * 18}ms` }}
-                  onClick={() => (m.conta ? onAbrir(m.conta, true) : onNovoDestino(m.label))}
-                  title={
-                    m.conta
-                      ? `${m.label} · R$ ${brl(m.conta.valor)} · ${m.conta.min} min`
-                      : `${m.label} livre`
-                  }
-                  className={cn(
-                    "press rise-in relative flex h-[4.25rem] flex-col items-center justify-center gap-0.5 rounded-2xl border-2 transition-colors",
-                    m.conta
-                      ? u?.cor === "danger"
-                        ? "seat-late border-danger/70 bg-danger text-danger-foreground"
-                        : "seat-busy border-warning/70 bg-warning text-warning-foreground"
-                      : "border-dashed border-border bg-card/50 text-muted-foreground hover:border-primary hover:bg-primary-soft hover:text-foreground",
-                    (ativa && m.conta?.id === ativa) || destino === m.label
-                      ? "ring-2 ring-primary ring-offset-2 ring-offset-secondary"
-                      : "",
-                  )}
-                >
-                  <span className="money text-[1.6rem] leading-none">{m.numero}</span>
-                  <span className="text-[0.625rem] font-black uppercase leading-none tracking-wide opacity-90">
-                    {m.conta ? `R$ ${brl(m.conta.valor)}` : "livre"}
-                  </span>
-                  {m.conta && config.cronometroAtivo ? (
-                    <span className="absolute -right-1.5 -top-1.5 rounded-full bg-card px-1.5 text-[0.625rem] font-black tabular-nums text-foreground shadow">
-                      {m.conta.min}′
+                <div key={m.label} className="relative">
+                  <button
+                    style={{ animationDelay: `${Math.min(i, 10) * 18}ms` }}
+                    onClick={() =>
+                      m.conta ? setDetalhe(m.conta.id) : onNovoDestino(m.label)
+                    }
+                    title={
+                      m.conta
+                        ? `${m.label} · R$ ${brl(m.conta.valor)} · ${m.conta.min} min`
+                        : `${m.label} livre`
+                    }
+                    className={cn(
+                      "press rise-in relative flex h-[4.25rem] w-full flex-col items-center justify-center gap-0.5 rounded-2xl border-2 transition-colors",
+                      m.conta
+                        ? u?.cor === "danger"
+                          ? "seat-late border-danger/70 bg-danger text-danger-foreground"
+                          : "seat-busy border-warning/70 bg-warning text-warning-foreground"
+                        : "border-dashed border-border bg-card/50 text-muted-foreground hover:border-primary hover:bg-primary-soft hover:text-foreground",
+                      (ativa && m.conta?.id === ativa) || destino === m.label
+                        ? "ring-2 ring-primary ring-offset-2 ring-offset-secondary"
+                        : "",
+                    )}
+                  >
+                    <span className="money text-[1.6rem] leading-none">{m.numero}</span>
+                    <span className="text-[0.625rem] font-black uppercase leading-none tracking-wide opacity-90">
+                      {m.conta ? (
+                        <span
+                          className={cn(
+                            "transition-[filter] duration-200",
+                            !visivel(m.conta.id) && "select-none blur-[5px]",
+                          )}
+                        >
+                          R$ {brl(m.conta.valor)}
+                        </span>
+                      ) : (
+                        "livre"
+                      )}
                     </span>
+                    {m.conta && config.cronometroAtivo ? (
+                      <span className="absolute -right-1.5 -top-1.5 rounded-full bg-card px-1.5 text-[0.625rem] font-black tabular-nums text-foreground shadow">
+                        {m.conta.min}′
+                      </span>
+                    ) : null}
+                  </button>
+                  {m.conta ? (
+                    <button
+                      type="button"
+                      onClick={() => alternar(m.conta!.id)}
+                      aria-pressed={visivel(m.conta.id)}
+                      aria-label={
+                        visivel(m.conta.id)
+                          ? `Esconder valor de ${m.label}`
+                          : `Mostrar valor de ${m.label}`
+                      }
+                      className="absolute -left-1 -top-1.5 grid size-6 place-items-center rounded-full bg-card text-muted-foreground shadow transition-colors hover:text-foreground"
+                    >
+                      {visivel(m.conta.id) ? (
+                        <EyeOff className="size-3.5" />
+                      ) : (
+                        <Eye className="size-3.5" />
+                      )}
+                    </button>
                   ) : null}
-                </button>
+                </div>
               );
             })}
+
           </div>
         ) : null}
 
@@ -350,39 +408,74 @@ export function PainelLateral({
                   u.cor === "danger" && "seat-late",
                 )}
               >
-                <button
-                  onClick={() => setExpandida((v) => (v === c.id ? null : c.id))}
-                  aria-expanded={expandida === c.id}
-                  className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 text-left"
-                >
-                  <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-secondary text-base font-black uppercase leading-none text-foreground/70">
-                    {c.label.trim().slice(0, 2)}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate font-bold leading-tight">{c.label}</span>
-                    <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                      {qtdItens} {qtdItens === 1 ? "item" : "itens"}
-                      {config.cronometroAtivo ? ` · há ${c.min} min` : ""}
-                      <ChevronDown
-                        className={cn(
-                          "size-3.5 transition-transform",
-                          expandida === c.id && "rotate-180",
-                        )}
-                      />
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                  <button
+                    onClick={() => setDetalhe(c.id)}
+                    title={`Ver e editar a conta de ${c.label}`}
+                    className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 text-left"
+                  >
+                    <span className="grid size-11 shrink-0 place-items-center rounded-lg bg-secondary text-base font-black uppercase leading-none text-foreground/70">
+                      {c.label.trim().slice(0, 2)}
                     </span>
-                  </span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-bold leading-tight">{c.label}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {qtdItens} {qtdItens === 1 ? "item" : "itens"}
+                        {config.cronometroAtivo ? ` · há ${c.min} min` : ""}
+                      </span>
+                    </span>
+                  </button>
                   <span className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="money text-xl leading-none">R$ {brl(c.valor)}</span>
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 text-[0.6875rem] font-bold tabular-nums",
-                        chip,
-                      )}
-                    >
-                      {u.rotulo}
+                    <span className="flex items-center gap-1">
+                      <span
+                        className={cn(
+                          "money text-xl leading-none transition-[filter] duration-200",
+                          !visivel(c.id) && "select-none blur-[5px]",
+                        )}
+                      >
+                        R$ {brl(c.valor)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => alternar(c.id)}
+                        aria-pressed={visivel(c.id)}
+                        aria-label={
+                          visivel(c.id)
+                            ? `Esconder valor de ${c.label}`
+                            : `Mostrar valor de ${c.label}`
+                        }
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        {visivel(c.id) ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                      </button>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[0.6875rem] font-bold tabular-nums",
+                          chip,
+                        )}
+                      >
+                        {u.rotulo}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setExpandida((v) => (v === c.id ? null : c.id))}
+                        aria-expanded={expandida === c.id}
+                        aria-label={`Espiar itens de ${c.label}`}
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <ChevronDown
+                          className={cn(
+                            "size-4 transition-transform",
+                            expandida === c.id && "rotate-180",
+                          )}
+                        />
+                      </button>
                     </span>
                   </span>
-                </button>
+                </div>
+
                 {/* O que a pessoa pediu, sem abrir a conta. */}
                 {expandida === c.id ? (
                   <ul className="rise-in mt-2 space-y-1 rounded-lg bg-secondary/60 p-2.5 text-xs">
@@ -449,15 +542,32 @@ export function PainelLateral({
         <div className="flex items-baseline justify-between text-sm">
           <span className="eyebrow text-muted-foreground">Falta receber</span>
           <span className="money text-3xl leading-none text-warning-foreground">
-            R$ {brl(pendente)}
+            <span
+              className={cn(
+                "transition-[filter] duration-200",
+                !todosVisiveis && "select-none blur-[5px]",
+              )}
+            >
+              R$ {brl(pendente)}
+            </span>
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
           {config.salaoAtivo
-            ? `Toque num ${config.termoMesa.toLowerCase()} livre para começar; num ocupado para receber.`
+            ? `Toque num ${config.termoMesa.toLowerCase()} livre para começar; num ocupado para ver a conta.`
             : "Anote a conta com um nome e receba quando o cliente voltar."}
         </p>
+
       </div>
+
+      {contaDoDetalhe ? (
+        <ModalConta
+          conta={contaDoDetalhe}
+          onFechar={() => setDetalhe(null)}
+          onAbrir={onAbrir}
+        />
+      ) : null}
     </>
+
   );
 }

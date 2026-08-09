@@ -1,5 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { Banknote, CreditCard, QrCode, Wallet } from "lucide-react";
+import { Banknote, CreditCard, IceCream, QrCode, Wallet } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/** Como o preço deste produto nasce. */
+export type ModoPreco = "fixed" | "flavor" | "manual" | "weight";
+
+/** Um sabor do mesmo produto, com preço próprio. Cada sabor pode cobrar do
+ *  seu jeito: valor fixo, valor digitado na hora ou por peso. */
+export type Sabor = {
+  nome: string;
+  preco: number;
+  /** ausente = preço fixo */
+  modo?: Exclude<ModoPreco, "flavor">;
+  /** quanto custa o quilo deste sabor, quando é vendido por peso */
+  precoKg?: number;
+};
 
 export type Produto = {
   id: string;
@@ -10,20 +25,55 @@ export type Produto = {
   tags: string[];
   /** foto do produto: `storage:<caminho>` ou link externo */
   foto?: string | null;
+  /** ausente = preço fixo, como sempre foi */
+  modo?: ModoPreco;
+  /** quanto custa o quilo, quando é vendido por peso */
+  precoKg?: number;
+  /** sabores com preços diferentes dentro do mesmo produto */
+  sabores?: Sabor[];
 };
 
-export type Linha = Produto & { qtd: number };
+/** Linha do carrinho. `uid` é a identidade da linha: duas pesagens do mesmo
+ *  produto convivem sem se somar; o preço fixo continua agrupando pelo id. */
+export type Linha = Produto & {
+  uid: string;
+  qtd: number;
+  /** nome que vai para a conta/recibo: "Açaí — Premium", "Sorvete 350 g" */
+  rotulo?: string;
+};
+
+export const modoDoProduto = (p: Produto): ModoPreco => p.modo ?? "fixed";
+
+/** Selo curto para o cartão do produto quando o preço não é fixo. */
+export function seloPreco(p: Produto): string | null {
+  const m = modoDoProduto(p);
+  if (m === "flavor") return "preço por sabor";
+  if (m === "manual") return "preço na hora";
+  if (m === "weight") return `R$ ${(p.precoKg ?? 0).toFixed(2).replace(".", ",")} / kg`;
+  return null;
+}
 
 export type ComandaCard = {
   id: string;
   label: string;
+  /** minutos em aberto — mostrado no modal de detalhes */
+  min?: number;
+  /** quando a conta foi aberta (ISO) — usado no histórico */
+  opened_at?: string | null;
   itens: {
+    /** id da linha no banco: só existe no que já foi gravado (editável) */
+    id?: string | null;
     product_id: string | null;
     product_name: string;
     unit_price: number;
     quantity: number;
+    /** horários da linha no banco — usados no histórico da conta */
+    created_at?: string | null;
+    updated_at?: string | null;
   }[];
 };
+
+
 
 export const pagamentos = [
   { rotulo: "Dinheiro", valor: "cash", icone: Banknote, tecla: "1" },
@@ -40,6 +90,32 @@ export type PartePagamento = { forma: FormaPagamento; valor: number };
 /** Cédulas reais do caixa: tocar na nota é mais rápido que digitar o valor. */
 export const cedulas = [5, 10, 20, 50, 100];
 
+/** Miniatura do produto: o olho reconhece a foto antes de ler o nome.
+ *  Sem foto cadastrada, o ícone da casa entra no lugar. */
+export function Foto({
+  produto,
+  url,
+  className,
+}: {
+  produto: { nome: string; foto?: string | null };
+  url?: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-primary-soft to-secondary/60",
+        className,
+      )}
+    >
+      {url ? (
+        <img src={url} alt="" loading="lazy" className="size-full object-cover" />
+      ) : (
+        <IceCream className="size-1/2 text-primary/50" />
+      )}
+    </span>
+  );
+}
 
 export const norm = (s: string) =>
   s

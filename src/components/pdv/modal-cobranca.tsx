@@ -1,29 +1,22 @@
-import { useEffect, useMemo } from "react";
-import { Check, Loader2, Plus, Split, TicketPercent, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowRight,
+  Check,
+  HandCoins,
+  Loader2,
+  Plus,
+  Split,
+  TicketPercent,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useConfirmar } from "@/components/confirmar";
 import { brl } from "@/lib/config";
+import { cent, resumoCobranca, type CobrancaEstado } from "@/lib/cobranca";
 import { cn } from "@/lib/utils";
-import { cedulas, pagamentos, type FormaPagamento, type PartePagamento } from "./comum";
+import { cedulas, pagamentos, type FormaPagamento } from "./comum";
 
-export type CobrancaEstado = {
-  /** forma escolhida para a próxima parte */
-  pagamento: FormaPagamento;
-  /** desconto sempre em reais — é assim que vai para o banco */
-  desconto: number;
-  /** chave do bloco de desconto: fechada, o modal fica com uma linha só */
-  descontoAtivo: boolean;
-  descontoModo: "reais" | "percent";
-  /** o número que a pessoa digitou, no modo escolhido */
-  descontoEntrada: number | null;
-  /** chave da conta dividida: quem paga numa forma só não vê nada disso */
-  dividir: boolean;
-  /** partes já encaixadas: dinheiro + PIX + cartão, quantas o cliente quiser */
-  partes: PartePagamento[];
-  /** valor digitado para a próxima parte (vazio = tudo que falta) */
-  parcial: number | null;
-  recebido: number | null;
-};
-
-const cent = (n: number) => Math.round(n * 100) / 100;
+export type { CobrancaEstado };
 
 /** Digitando num campo, o teclado é do campo: 1-2-3-4 viram número, não
  *  atalho de forma de pagamento. */
@@ -66,28 +59,27 @@ export function ModalCobranca({
     partes,
     parcial,
     recebido,
+    trocoDoado,
   } = estado;
 
-  const aPagar = Math.max(0, cent(bruto - desconto));
-  const pago = cent(partes.reduce((s, p) => s + p.valor, 0));
-  const falta = Math.max(0, cent(aPagar - pago));
+  /* Uma conta só, a mesma que o salvamento usa: o que entrou é o que vale. */
+  const resumo = resumoCobranca(bruto, estado);
+  const { aPagar, pago, falta, cobrado, diferenca, troco, podeFechar } = resumo;
   const quitado = falta < 0.005;
+  const confirmar = useConfirmar();
+  /* Desconto agora é uma janelinha por cima do modal: menos informação na tela. */
+  const [descontoAberto, setDescontoAberto] = useState(false);
+  const campoParcial = useRef<HTMLInputElement>(null);
 
   const rotulo = (f: FormaPagamento) => pagamentos.find((p) => p.valor === f)?.rotulo ?? f;
 
-  /* Só a parte em dinheiro pede troco — inclusive o que ainda falta,
-     quando o operador vai fechar direto na forma selecionada. */
-  const emDinheiro = cent(
-    partes.filter((p) => p.forma === "cash").reduce((s, p) => s + p.valor, 0) +
-      (!quitado && pagamento === "cash" ? falta : 0),
-  );
-
+  const dinheiro = pagamento === "cash";
   const sugestoes = useMemo(() => {
-    if (emDinheiro <= 0) return [];
-    const dezena = Math.ceil(emDinheiro / 10) * 10;
-    const vals = [dezena, ...cedulas.filter((c) => c > emDinheiro)];
+    if (!dinheiro || aPagar <= 0) return [];
+    const dezena = Math.ceil(aPagar / 10) * 10;
+    const vals = [dezena, ...cedulas.filter((c) => c > aPagar)];
     return [...new Set(vals.map(cent))].sort((a, b) => a - b).slice(0, 4);
-  }, [emDinheiro]);
+  }, [dinheiro, aPagar]);
 
   /** Converte o que foi digitado (R$ ou %) no desconto em reais. */
   const aplicarDesconto = (entrada: number | null, modo: "reais" | "percent") => {
@@ -97,29 +89,42 @@ export function ModalCobranca({
       descontoEntrada: entrada,
       descontoModo: modo,
       desconto: Math.min(bruto, Math.max(0, reais)),
-      partes: [],
+    });
+  };
+
+  const removerDesconto = () => {
+    set({ descontoAtivo: false, desconto: 0, descontoEntrada: null });
+    setDescontoAberto(false);
+  };
+
+  const alternarDividir = (ligado: boolean) =>
+    ligado
+      ? set({ dividir: true, recebido: null, trocoDoado: false })
+      : set({ dividir: false, partes: [], parcial: null, recebido: null, trocoDoado: false });
+
+  /* O valor digitado é respeitado — se passar do que falta, a sobra vira
+     acréscimo em vez de ser cortada em silêncio. */
+  const valorParte = cent(parcial && parcial > 0 ? parcial : falta);
+
+  const adicionarParte = () => {
+    if (valorParte <= 0) return;
+    set({
+      partes: [...partes, { forma: pagamento, valor: valorParte }],
+      parcial: null,
       recebido: null,
     });
   };
 
-  const alternarDesconto = (ligado: boolean) =>
-    ligado
-      ? set({ descontoAtivo: true })
-      : set({
-          descontoAtivo: false,
-          desconto: 0,
-          descontoEntrada: null,
-          partes: [],
-          recebido: null,
-        });
-
-  const alternarDividir = (ligado: boolean) =>
-    ligado ? set({ dividir: true }) : set({ dividir: false, partes: [], parcial: null, recebido: null });
-
-  const adicionarParte = () => {
-    const valor = cent(Math.min(parcial && parcial > 0 ? parcial : falta, falta));
-    if (valor <= 0) return;
-    set({ partes: [...partes, { forma: pagamento, valor }], parcial: null, recebido: null });
+  /* Botão principal quando ainda falta: encaixa o que falta, ou leva o foco
+     para o campo com o valor já preenchido. Nada entra sozinho ao confirmar. */
+  const encaixarFalta = () => {
+    if (falta <= 0.005) return;
+    if (parcial && parcial > 0) {
+      adicionarParte();
+      return;
+    }
+    set({ parcial: cent(falta) });
+    requestAnimationFrame(() => campoParcial.current?.focus());
   };
 
   const removerParte = (i: number) =>
@@ -129,27 +134,48 @@ export function ModalCobranca({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onFechar();
+        if (descontoAberto) setDescontoAberto(false);
+        else onFechar();
         return;
       }
+      /* Janelinha do desconto manda no teclado enquanto está aberta. */
+      if (descontoAberto) return;
       if (digitando(e.target)) return;
       if (e.key === "Enter") {
         e.preventDefault();
-        onConfirmar();
+        if (dividir && !podeFechar) encaixarFalta();
+        else void confirmarComAviso();
       } else if (e.key === "+") {
         e.preventDefault();
         if (dividir) adicionarParte();
       } else {
         const forma = pagamentos.find((p) => p.tecla === e.key);
-        if (forma) set({ pagamento: forma.valor, recebido: null });
+        if (forma) set({ pagamento: forma.valor, recebido: null, trocoDoado: false });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const troco = recebido !== null ? Math.max(0, cent(recebido - emDinheiro)) : null;
-  const faltou = recebido !== null && recebido < emDinheiro - 0.005;
+  const informado = cent(recebido ?? aPagar);
+
+  /* Um aviso só: produtos, o que entrou e para onde vai a diferença. */
+  const confirmarComAviso = async () => {
+    if (pendente) return;
+    if (Math.abs(diferenca) >= 0.005) {
+      const aMais = diferenca > 0;
+      const ok = await confirmar({
+        titulo: aMais ? `Sobra de R$ ${brl(diferenca)}` : `Falta R$ ${brl(Math.abs(diferenca))}`,
+        descricao: `Produtos R$ ${brl(aPagar)} · recebido R$ ${brl(cobrado)} — a diferença entra como ${
+          aMais ? "acréscimo" : "desconto"
+        } e a venda fecha em R$ ${brl(cobrado)}.`,
+        confirmar: "Fechar assim",
+      });
+      if (!ok) return;
+    }
+    onConfirmar();
+  };
+
   const equivalente =
     descontoModo === "percent"
       ? `− R$ ${brl(desconto)}`
@@ -201,24 +227,35 @@ export function ModalCobranca({
               {quitado ? "Conta fechada" : `Falta R$ ${brl(falta)}`}
             </p>
           ) : null}
+          {Math.abs(diferenca) >= 0.005 ? (
+            /* Faixa fina: a diferença aparece, sem pop-up e sem repetição. */
+            <p
+              className={cn(
+                "mt-2 text-sm font-bold",
+                diferenca > 0 ? "text-success" : "text-danger",
+              )}
+            >
+              {diferenca > 0
+                ? `Acréscimo de R$ ${brl(diferenca)} — fecha em R$ ${brl(cobrado)}`
+                : `R$ ${brl(Math.abs(diferenca))} a menos — fecha em R$ ${brl(cobrado)}`}
+            </p>
+          ) : null}
         </div>
 
-        {/* Duas chaves: desconto e conta dividida. Desligadas, somem da tela. */}
+        {/* Desconto abre uma janelinha; dividir é uma chave. O corpo fica limpo. */}
         <div className="mt-4 grid grid-cols-2 gap-2 px-6">
-          <label
+          <button
+            onClick={() => {
+              set({ descontoAtivo: true });
+              setDescontoAberto(true);
+            }}
             className={cn(
-              "press flex cursor-pointer items-center gap-2 rounded-xl border-2 px-3 py-2.5 text-xs font-black uppercase tracking-wide transition-colors",
-              descontoAtivo
+              "press flex items-center gap-2 rounded-xl border-2 px-3 py-2.5 text-xs font-black uppercase tracking-wide transition-colors",
+              desconto > 0
                 ? "border-primary bg-primary-soft text-foreground"
                 : "border-border bg-secondary/40 text-muted-foreground hover:border-primary/50",
             )}
           >
-            <input
-              type="checkbox"
-              checked={descontoAtivo}
-              onChange={(e) => alternarDesconto(e.target.checked)}
-              className="size-4 accent-[hsl(var(--primary))]"
-            />
             <TicketPercent className="size-4" />
             Desconto
             {desconto > 0 ? (
@@ -226,7 +263,7 @@ export function ModalCobranca({
                 − {brl(desconto)}
               </span>
             ) : null}
-          </label>
+          </button>
 
           <label
             className={cn(
@@ -247,57 +284,92 @@ export function ModalCobranca({
           </label>
         </div>
 
-        {descontoAtivo ? (
-          <div className="rise-in mt-2 rounded-2xl border border-border bg-secondary/30 p-3 mx-6">
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-              <div className="flex overflow-hidden rounded-xl border-2 border-border">
-                {(["reais", "percent"] as const).map((m) => (
+        {descontoAberto ? (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Desconto"
+            className="overlay-in fixed inset-0 z-[60] grid place-items-center bg-foreground/50 p-4"
+            onClick={() => setDescontoAberto(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="modal-in w-full max-w-sm rounded-3xl border-2 border-primary/30 bg-card p-5 shadow-2xl"
+            >
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="eyebrow text-muted-foreground">Desconto</p>
+                  <p className="money text-2xl leading-none text-danger">− R$ {brl(desconto)}</p>
+                </div>
+                <p className="money text-right text-sm text-muted-foreground">
+                  fica R$ {brl(aPagar)}
+                </p>
+              </div>
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
+                <div className="flex overflow-hidden rounded-xl border-2 border-border">
+                  {(["reais", "percent"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => aplicarDesconto(descontoEntrada, m)}
+                      className={cn(
+                        "h-12 w-12 text-sm font-black transition-colors",
+                        descontoModo === m
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {m === "reais" ? "R$" : "%"}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  step={descontoModo === "percent" ? 1 : 0.5}
+                  autoFocus
+                  value={descontoEntrada ?? ""}
+                  onChange={(e) =>
+                    aplicarDesconto(
+                      e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
+                      descontoModo,
+                    )
+                  }
+                  placeholder={descontoModo === "percent" ? "Quantos %" : "Quantos reais"}
+                  aria-label="Valor do desconto"
+                  className="money h-12 rounded-xl border-2 border-border bg-card px-3 text-lg outline-none focus:border-primary"
+                />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                {[5, 10, 15].map((p) => (
                   <button
-                    key={m}
-                    onClick={() => aplicarDesconto(descontoEntrada, m)}
+                    key={p}
+                    onClick={() => aplicarDesconto(p, "percent")}
                     className={cn(
-                      "h-12 w-12 text-sm font-black transition-colors",
-                      descontoModo === m
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card text-muted-foreground hover:text-foreground",
+                      "press h-9 flex-1 rounded-lg border text-xs font-black uppercase tracking-wide transition-colors",
+                      descontoModo === "percent" && descontoEntrada === p
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-card text-muted-foreground hover:border-primary/60",
                     )}
                   >
-                    {m === "reais" ? "R$" : "%"}
+                    {p}%
                   </button>
                 ))}
+                <span className="money ml-auto text-sm text-muted-foreground">{equivalente}</span>
               </div>
-              <input
-                type="number"
-                min={0}
-                step={descontoModo === "percent" ? 1 : 0.5}
-                value={descontoEntrada ?? ""}
-                onChange={(e) =>
-                  aplicarDesconto(
-                    e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
-                    descontoModo,
-                  )
-                }
-                placeholder={descontoModo === "percent" ? "Quantos %" : "Quantos reais"}
-                aria-label="Valor do desconto"
-                className="money h-12 rounded-xl border-2 border-border bg-card px-3 text-lg outline-none focus:border-primary"
-              />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              {[5, 10, 15].map((p) => (
+              <div className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] gap-2">
                 <button
-                  key={p}
-                  onClick={() => aplicarDesconto(p, "percent")}
-                  className={cn(
-                    "press h-9 flex-1 rounded-lg border text-xs font-black uppercase tracking-wide transition-colors",
-                    descontoModo === "percent" && descontoEntrada === p
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-muted-foreground hover:border-primary/60",
-                  )}
+                  onClick={removerDesconto}
+                  className="press rounded-xl border-2 border-border px-4 py-3 text-xs font-black uppercase tracking-wide text-muted-foreground hover:border-danger hover:text-danger"
                 >
-                  {p}%
+                  Remover
                 </button>
-              ))}
-              <span className="money ml-auto text-sm text-muted-foreground">{equivalente}</span>
+                <button
+                  onClick={() => setDescontoAberto(false)}
+                  className="press rounded-xl bg-primary px-4 py-3 text-sm font-black uppercase tracking-wide text-primary-foreground"
+                >
+                  Aplicar
+                </button>
+              </div>
             </div>
           </div>
         ) : null}
@@ -348,124 +420,193 @@ export function ModalCobranca({
               ))}
             </div>
 
-            {/* Encaixe parcial: digita quanto entra agora, o resto continua na conta. */}
+            {/* Encaixe parcial: digita o valor que entra agora, o resto fica na conta.
+                Um campo só — o de "valor recebido" sai de cena enquanto divide. */}
             {dividir ? (
               <div className="px-6 pt-3">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    max={falta}
-                    step="0.5"
-                    value={parcial ?? ""}
-                    onChange={(e) =>
-                      set({
-                        parcial: e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
-                        recebido: null,
-                      })
-                    }
-                    placeholder={`Quanto entra agora · falta R$ ${brl(falta)}`}
-                    aria-label="Valor desta parte do pagamento"
-                    className="money h-14 rounded-xl border-2 border-border bg-secondary/30 px-4 text-lg outline-none focus:border-primary focus:bg-card"
-                  />
+                <input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  inputMode="decimal"
+                  autoFocus
+                  ref={campoParcial}
+                  value={parcial ?? ""}
+                  onChange={(e) =>
+                    set({
+                      parcial: e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
+                      recebido: null,
+                    })
+                  }
+                  placeholder={`Valor desta parte · falta R$ ${brl(falta)}`}
+                  aria-label="Valor desta parte do pagamento"
+                  className="money h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-4 text-2xl outline-none focus:border-primary focus:bg-card"
+                />
+                {falta > 0.005 ? (
                   <button
-                    onClick={adicionarParte}
-                    className="press flex h-14 items-center gap-2 rounded-xl border-2 border-primary bg-primary-soft px-4 text-xs font-black uppercase tracking-wide"
+                    onClick={() => set({ parcial: cent(falta) })}
+                    className="press mt-2 w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground hover:border-primary hover:text-foreground"
                   >
-                    <Plus className="size-4" />
-                    Encaixar parte
-                    <span className="kbd">+</span>
+                    Usar o que falta · R$ {brl(falta)} em {rotulo(pagamento).toLowerCase()}
                   </button>
-                </div>
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  O que sobrar sai em {rotulo(pagamento).toLowerCase()} ao confirmar.
-                </p>
+                ) : null}
+                <button
+                  onClick={adicionarParte}
+                  className="press mt-2 flex h-14 w-full items-center justify-center gap-2 rounded-xl border-2 border-primary bg-primary-soft text-sm font-black uppercase tracking-wide"
+                >
+                  <Plus className="size-5" />
+                  Encaixar {brl(valorParte)} em {rotulo(pagamento).toLowerCase()}
+                  <span className="kbd">+</span>
+                </button>
               </div>
             ) : null}
           </>
         ) : null}
 
-        {emDinheiro > 0 ? (
+        {!dividir ? (
           <div className="px-6 pt-4">
-            <p className="eyebrow mb-2 text-muted-foreground">
-              Quanto o cliente deu em dinheiro? (R$ {brl(emDinheiro)})
-            </p>
-            <input
-              type="number"
-              min={0}
-              step="0.5"
-              inputMode="decimal"
-              value={recebido ?? ""}
-              onChange={(e) =>
-                set({
-                  recebido: e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
-                })
-              }
-              placeholder={`Digite o valor recebido · R$ ${brl(emDinheiro)}`}
-              aria-label="Valor recebido em dinheiro"
-              className="money h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-4 text-2xl outline-none focus:border-success focus:bg-card"
-            />
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button
-                onClick={() => set({ recebido: emDinheiro })}
-                className="press rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground hover:border-success hover:text-foreground"
-              >
-                Certo
-              </button>
-              {sugestoes.map((v) => (
+            {/* Sem dividir, o campo vale para a forma escolhida — dinheiro, PIX ou cartão. */}
+            <>
+              <p className="eyebrow mb-2 text-muted-foreground">
+                {dinheiro
+                  ? `Quanto o cliente deu em dinheiro? (R$ ${brl(aPagar)})`
+                  : `Quanto entrou em ${rotulo(pagamento).toLowerCase()}? (R$ ${brl(aPagar)})`}
+              </p>
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                inputMode="decimal"
+                value={recebido ?? ""}
+                onChange={(e) =>
+                  set({
+                    recebido: e.target.value === "" ? null : Math.max(0, Number(e.target.value)),
+                  })
+                }
+                placeholder={`Digite o valor · R$ ${brl(aPagar)}`}
+                aria-label={`Valor pago em ${rotulo(pagamento).toLowerCase()}`}
+                className="money h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-4 text-2xl outline-none focus:border-success focus:bg-card"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
-                  key={v}
-                  onClick={() => set({ recebido: v })}
-                  className="money press rounded-lg border border-border bg-card px-3 py-1.5 text-sm leading-none text-muted-foreground hover:border-success hover:text-foreground"
+                  onClick={() => set({ recebido: aPagar, trocoDoado: false })}
+                  className="press rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground hover:border-success hover:text-foreground"
                 >
-                  {brl(v)}
+                  Certo
                 </button>
-              ))}
-            </div>
-            {recebido !== null ? (
-              <div
-                key={recebido}
-                className={cn(
-                  "troco-pop mt-3 flex items-baseline justify-between rounded-2xl px-5 py-4",
-                  faltou ? "bg-danger-soft" : "glow-success bg-success-soft",
-                )}
-              >
-                <span className="eyebrow text-foreground/60">{faltou ? "Falta" : "Troco"}</span>
-                <span
-                  className={cn(
-                    "money text-5xl leading-none",
-                    faltou ? "text-danger" : "text-success",
-                  )}
-                >
-                  R$ {brl(faltou ? emDinheiro - recebido : (troco ?? 0))}
-                </span>
+                {dinheiro
+                  ? sugestoes.map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => set({ recebido: v })}
+                        className="money press rounded-lg border border-border bg-card px-3 py-1.5 text-sm leading-none text-muted-foreground hover:border-success hover:text-foreground"
+                      >
+                        {brl(v)}
+                      </button>
+                    ))
+                  : null}
               </div>
+            </>
+
+            {/* Troco só em dinheiro. Nas outras formas, o que passa vira acréscimo. */}
+            {dinheiro && troco > 0.005 ? (
+              <div
+                key={informado}
+                className="troco-pop glow-success mt-3 rounded-2xl bg-success-soft px-5 py-4"
+              >
+                <div className="flex items-baseline justify-between">
+                  <span className="eyebrow text-foreground/60">Troco</span>
+                  <span className="money text-5xl leading-none text-success">R$ {brl(troco)}</span>
+                </div>
+                <button
+                  onClick={() => set({ trocoDoado: true })}
+                  className="press mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-success bg-card px-3 py-2 text-xs font-black uppercase tracking-wide text-success"
+                >
+                  <HandCoins className="size-4" />
+                  Cliente deixou o troco
+                </button>
+              </div>
+            ) : null}
+
+            {dinheiro && trocoDoado && informado > aPagar + 0.005 ? (
+              <button
+                onClick={() => set({ trocoDoado: false })}
+                className="press mt-3 w-full rounded-2xl bg-success-soft px-5 py-4 text-left"
+              >
+                <span className="eyebrow text-foreground/60">Troco deixado na loja</span>
+                <span className="money ml-2 text-2xl leading-none text-success">
+                  R$ {brl(cent(informado - aPagar))}
+                </span>
+                <span className="ml-2 text-xs font-bold text-muted-foreground">
+                  toque para devolver
+                </span>
+              </button>
             ) : null}
           </div>
         ) : null}
 
-        <div className="mt-5 grid grid-cols-[auto_minmax(0,1fr)] gap-3 border-t border-border bg-secondary/40 p-5">
-          <button
-            onClick={onFechar}
-            className="press rounded-2xl px-6 text-base font-bold text-muted-foreground hover:text-foreground"
-          >
-            Voltar <span className="kbd">Esc</span>
-          </button>
-          <button
-            onClick={onConfirmar}
-            disabled={pendente}
-            className="press glow-success flex min-h-[4.5rem] items-center justify-center gap-3 rounded-2xl bg-success font-display text-3xl tracking-wider text-success-foreground disabled:opacity-50"
-          >
-            {pendente ? (
-              <Loader2 className="size-8 animate-spin" />
+        <div className="mt-5 border-t border-border bg-secondary/40 p-5">
+          {/* Uma linha só, sempre visível: o que a conta vale, o que já entrou
+              e o que ainda falta — para o botão verde nunca surpreender. */}
+          {dividir ? (
+            <p className="mb-3 text-sm font-bold text-muted-foreground">
+              Produtos R$ {brl(aPagar)} · Encaixado R$ {brl(pago)} ·{" "}
+              {falta > 0.005 ? (
+                <span className="text-warning-foreground">Falta R$ {brl(falta)}</span>
+              ) : diferenca > 0.005 ? (
+                <span className="text-success">Sobra R$ {brl(diferenca)}</span>
+              ) : (
+                <span className="text-success">Conta fechada</span>
+              )}
+            </p>
+          ) : null}
+
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+            <button
+              onClick={onFechar}
+              className="press rounded-2xl px-6 text-base font-bold text-muted-foreground hover:text-foreground"
+            >
+              Voltar <span className="kbd">Esc</span>
+            </button>
+            {podeFechar ? (
+              <button
+                onClick={() => void confirmarComAviso()}
+                disabled={pendente}
+                className="press glow-success flex min-h-[4.5rem] items-center justify-center gap-3 rounded-2xl bg-success font-display text-3xl tracking-wider text-success-foreground disabled:opacity-50"
+              >
+                {pendente ? (
+                  <Loader2 className="size-8 animate-spin" />
+                ) : (
+                  <>
+                    <Check className="size-8" strokeWidth={3} />
+                    Confirmar R$ {brl(cobrado)}
+                    <span className="kbd">Enter</span>
+                  </>
+                )}
+              </button>
             ) : (
-              <>
-                <Check className="size-8" strokeWidth={3} />
-                Confirmar
+              /* Falta dinheiro: o botão encaixa a parte, nunca fecha escondido. */
+              <button
+                onClick={encaixarFalta}
+                className="press flex min-h-[4.5rem] items-center justify-center gap-3 rounded-2xl border-2 border-warning bg-warning-soft font-display text-2xl tracking-wide text-warning-foreground"
+              >
+                <ArrowRight className="size-7" strokeWidth={3} />
+                Falta R$ {brl(falta)}
                 <span className="kbd">Enter</span>
-              </>
+              </button>
             )}
-          </button>
+          </div>
+
+          {/* Fechar com menos do que a conta é decisão explícita, com aviso. */}
+          {!podeFechar && partes.length > 0 && falta > 0.005 ? (
+            <button
+              onClick={() => void confirmarComAviso()}
+              disabled={pendente}
+              className="press mt-2 w-full rounded-xl border border-border bg-card px-3 py-2 text-xs font-black uppercase tracking-wide text-muted-foreground hover:border-danger hover:text-danger disabled:opacity-50"
+            >
+              Fechar assim com desconto de R$ {brl(falta)}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
