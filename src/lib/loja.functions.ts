@@ -24,6 +24,8 @@ const produtoSchema = z.object({
   pricing_mode: z.enum(["fixed", "flavor", "manual", "weight"]).default("fixed"),
   price_per_kg: z.number().min(0).max(999999).default(0),
   variants: z.array(saborSchema).max(30).default([]),
+  /** sabores que NÃO mexem no preço: só escolha na venda ("morango", "uva") */
+  opcoes: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
 });
 
 export type ProdutoInput = z.infer<typeof produtoSchema>;
@@ -34,7 +36,7 @@ export const listarProdutos = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("products")
       .select(
-        "id, name, code, category, tags, price, active, image_url, pricing_mode, price_per_kg, variants",
+        "id, name, code, category, tags, price, active, image_url, pricing_mode, price_per_kg, variants, opcoes",
       )
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -60,6 +62,7 @@ export const salvarProduto = createServerFn({ method: "POST" })
       pricing_mode: data.pricing_mode,
       price_per_kg: data.pricing_mode === "weight" ? data.price_per_kg : 0,
       variants: data.pricing_mode === "flavor" ? data.variants : [],
+      opcoes: data.opcoes,
     };
 
     const query = data.id

@@ -1,41 +1,56 @@
 import { useState } from "react";
-import { Lock, LockOpen, ShieldCheck } from "lucide-react";
+import { KeyRound, Lock, LockOpen, ShieldCheck } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Modal } from "@/components/modal";
+import { CampoSenha } from "@/components/campo-senha";
 import { useConfig } from "@/lib/config";
-import { criarTrava, secoes, senhaConfere, type Secao } from "@/lib/travas";
+import { confirmarSenhaLogin } from "@/lib/conta.functions";
+import { criarTrava, secoes, senhaConfere, senhaValida, type Secao } from "@/lib/travas";
 import { cn } from "@/lib/utils";
 
 /**
  * Cadeado por seção. Um toque no ícone abre a conversa: põe senha, troca ou
  * tira. A senha nunca é guardada em texto — fica só o resumo embaralhado.
+ * Esqueceu? A senha do login vale como chave-mestra.
  */
 export function CartaoSeguranca() {
   const [config, setConfig] = useConfig();
+  const confirmarLogin = useServerFn(confirmarSenhaLogin);
   const [alvo, setAlvo] = useState<Secao | null>(null);
   const [senha, setSenha] = useState("");
   const [repetir, setRepetir] = useState("");
   const [atual, setAtual] = useState("");
+  const [mestra, setMestra] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
   const bloqueios = config.bloqueios ?? {};
   const travaAtual = alvo ? bloqueios[alvo] : undefined;
   const nomeAlvo = secoes.find((s) => s.chave === alvo)?.rotulo ?? "";
+  /* Depois de provar quem é pelo login, a senha antiga deixa de ser exigida. */
+  const liberado = !travaAtual || mestra === "ok";
 
   const fechar = () => {
     setAlvo(null);
     setSenha("");
     setRepetir("");
     setAtual("");
+    setMestra(null);
+  };
+
+  const conferirAtual = async () => {
+    if (liberado) return true;
+    if (!travaAtual) return true;
+    if (await senhaConfere(atual, travaAtual)) return true;
+    toast.error("A senha atual não confere.");
+    return false;
   };
 
   const definir = async () => {
     if (!alvo || salvando) return;
-    if (travaAtual && !(await senhaConfere(atual, travaAtual))) {
-      return toast.error("A senha atual não confere.");
-    }
-    if (senha.length < 4) return toast.error("Use pelo menos 4 caracteres.");
+    if (!senhaValida(senha)) return toast.error("Use pelo menos 4 caracteres.");
     if (senha !== repetir) return toast.error("As duas senhas precisam ser iguais.");
+    if (!(await conferirAtual())) return;
     setSalvando(true);
     const trava = await criarTrava(senha);
     setConfig({ bloqueios: { ...bloqueios, [alvo]: trava } });
@@ -46,14 +61,24 @@ export function CartaoSeguranca() {
 
   const remover = async () => {
     if (!alvo || !travaAtual) return;
-    if (!(await senhaConfere(atual, travaAtual))) {
-      return toast.error("A senha atual não confere.");
-    }
+    if (!(await conferirAtual())) return;
     const proximo = { ...bloqueios };
     delete proximo[alvo];
     setConfig({ bloqueios: proximo });
     toast.success(`${nomeAlvo} está liberado.`);
     fechar();
+  };
+
+  const usarSenhaDoLogin = async () => {
+    const digitada = window.prompt("Digite a senha que você usa para entrar no sistema:");
+    if (!digitada) return;
+    try {
+      await confirmarLogin({ data: { senha: digitada } });
+      setMestra("ok");
+      toast.success("Confirmado! Agora escolha a senha nova.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "A senha do login não confere.");
+    }
   };
 
   return (
@@ -103,9 +128,9 @@ export function CartaoSeguranca() {
         <Modal
           titulo={`${travaAtual ? "Senha de" : "Proteger"} ${nomeAlvo}`}
           subtitulo={
-            travaAtual
-              ? "Digite a senha atual para trocar ou tirar o cadeado."
-              : "Escolha uma senha só para esta tela."
+            liberado
+              ? "Escolha a senha desta tela."
+              : "Digite a senha atual para trocar ou tirar o cadeado."
           }
           onFechar={fechar}
           rodape={
@@ -122,8 +147,8 @@ export function CartaoSeguranca() {
               <button
                 type="button"
                 onClick={() => void definir()}
-                disabled={salvando}
-                className="press h-12 flex-1 rounded-xl bg-primary font-bold text-primary-foreground disabled:opacity-50"
+                disabled={salvando || !senhaValida(senha) || senha !== repetir}
+                className="press h-12 flex-1 rounded-xl bg-primary font-bold text-primary-foreground disabled:opacity-40"
               >
                 {travaAtual ? "Trocar senha" : "Ativar cadeado"}
               </button>
@@ -131,42 +156,52 @@ export function CartaoSeguranca() {
           }
         >
           <div className="grid gap-3">
-            {travaAtual ? (
-              <label className="text-sm font-bold">
-                Senha atual
-                <input
-                  type="password"
+            {travaAtual && !liberado ? (
+              <>
+                <CampoSenha
+                  rotulo="Senha atual"
+                  medidor={false}
                   autoFocus
-                  value={atual}
-                  onChange={(e) => setAtual(e.target.value)}
-                  className="money mt-1 h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-3 text-xl outline-none focus:border-primary"
+                  placeholder="a senha desta tela"
+                  valor={atual}
+                  onChange={setAtual}
                 />
-              </label>
+                <button
+                  type="button"
+                  onClick={() => void usarSenhaDoLogin()}
+                  className="press flex h-11 items-center justify-center gap-2 rounded-xl border-2 border-border text-sm font-bold hover:border-primary"
+                >
+                  <KeyRound className="size-4" />
+                  Esqueci esta senha — usar a senha do login
+                </button>
+              </>
             ) : null}
-            <label className="text-sm font-bold">
-              Nova senha
-              <input
-                type="password"
-                autoFocus={!travaAtual}
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                placeholder="mínimo 4 caracteres"
-                className="money mt-1 h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-3 text-xl outline-none focus:border-primary"
-              />
-            </label>
-            <label className="text-sm font-bold">
-              Repita a nova senha
-              <input
-                type="password"
-                value={repetir}
-                onChange={(e) => setRepetir(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void definir()}
-                className="money mt-1 h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-3 text-xl outline-none focus:border-primary"
-              />
-            </label>
+            {liberado && travaAtual ? (
+              <p className="rounded-xl bg-success-soft px-3 py-2 text-xs font-bold text-success">
+                Identidade confirmada pelo login. Pode definir a senha nova.
+              </p>
+            ) : null}
+
+            <CampoSenha
+              rotulo="Nova senha"
+              autoFocus={!travaAtual}
+              valor={senha}
+              onChange={setSenha}
+            />
+            <CampoSenha
+              rotulo="Repita a nova senha"
+              medidor={false}
+              placeholder="igual à de cima"
+              valor={repetir}
+              onChange={setRepetir}
+              onEnter={() => void definir()}
+            />
+            {repetir.length > 0 && repetir !== senha ? (
+              <p className="text-xs font-bold text-danger">As duas senhas não batem.</p>
+            ) : null}
+
             <p className="rounded-xl bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
-              Guarde a senha em lugar seguro: sem ela, a tela não abre e só dá para liberar aqui
-              no Admin.
+              Esqueceu a senha desta tela? A senha do login abre tudo aqui no Admin.
             </p>
           </div>
         </Modal>

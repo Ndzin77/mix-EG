@@ -13,6 +13,8 @@ export type PrecoResolvido = {
   rotulo: string;
   /** quantidade da linha (peso vira 1 embalagem já pesada) */
   qtd: number;
+  /** quando existe, linhas iguais se somam por esta chave (sabor de preço fixo) */
+  chave?: string;
 };
 
 const so = (v: string) => v.replace(/[^\d,.]/g, "").replace(".", ",");
@@ -262,6 +264,47 @@ export function ModalPreco({
           </div>
         </>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Sabor que não mexe no preço: uma pergunta, botões grandes, um toque.
+ * O olho lê o sabor antes do preço — por isso o nome ocupa a linha inteira.
+ */
+export function ModalOpcao({
+  produto,
+  url,
+  onFechar,
+  onEscolher,
+}: {
+  produto: Produto;
+  url?: string;
+  onFechar: () => void;
+  onEscolher: (opcao: string) => void;
+}) {
+  const opcoes = produto.opcoes ?? [];
+  return (
+    <Modal titulo="Qual sabor?" subtitulo={produto.nome} onFechar={onFechar}>
+      <div className="mb-4 flex items-center gap-3">
+        <Foto produto={produto} url={url} className="size-14" />
+        <p className="text-sm text-muted-foreground">
+          Todos custam o mesmo — a escolha só aparece na conta e no recibo.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {opcoes.map((o) => (
+          <button
+            key={o}
+            type="button"
+            onClick={() => onEscolher(o)}
+            className="press flex h-16 items-center justify-between gap-3 rounded-xl border-2 border-border bg-secondary/30 px-4 text-left font-display text-xl tracking-wide hover:border-primary hover:bg-primary-soft"
+          >
+            <span className="truncate">{o}</span>
+            <Check className="size-5 shrink-0 text-primary" />
+          </button>
+        ))}
+      </div>
     </Modal>
   );
 }

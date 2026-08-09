@@ -39,7 +39,7 @@ function AuthPage() {
   useEffect(() => {
     setPronto(true);
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/", replace: true });
+      if (data.session) navigate({ to: "/vendas", replace: true });
     });
   }, [navigate]);
 
@@ -61,7 +61,7 @@ function AuthPage() {
               : error.message,
         );
       }
-      navigate({ to: "/", replace: true });
+      navigate({ to: "/vendas", replace: true });
     } catch (erro) {
       toast.error(erro instanceof Error ? erro.message : "Não foi possível entrar.");
     } finally {

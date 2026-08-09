@@ -35,7 +35,7 @@ import {
   type Linha,
   type Produto,
 } from "@/components/pdv/comum";
-import { ModalPreco, type PrecoResolvido } from "@/components/pdv/modal-preco";
+import { ModalOpcao, ModalPreco, type PrecoResolvido } from "@/components/pdv/modal-preco";
 import { useImagens } from "@/lib/imagens";
 import { ModalRecibo } from "@/components/recibo/recibo";
 import type { ReciboDados } from "@/lib/recibo";
@@ -48,7 +48,7 @@ import { enviar } from "@/lib/offline";
 import { novoId } from "@/lib/fila-offline";
 import { AvisoErro } from "@/components/aviso-erro";
 
-export const Route = createFileRoute("/_authenticated/")({
+export const Route = createFileRoute("/_authenticated/vendas")({
   head: () => ({
     meta: [
       { title: "Vendas — EG Mix Sorveteria e Confeitaria" },
@@ -126,6 +126,7 @@ function VendasPage() {
                 precoKg: Number(v?.precoKg ?? 0),
               }))
             : [],
+          opcoes: Array.isArray(p.opcoes) ? (p.opcoes as string[]) : [],
         })),
     [produtosQuery.data],
   );
@@ -153,6 +154,9 @@ function VendasPage() {
 
   /** produto esperando o preço (sabor, valor na hora ou peso) */
   const [precoDe, setPrecoDe] = useState<Produto | null>(null);
+  /** produto esperando a escolha do sabor que não mexe no preço */
+  const [opcaoDe, setOpcaoDe] = useState<Produto | null>(null);
+  const [opcaoEscolhida, setOpcaoEscolhida] = useState<string | null>(null);
   const [cobrando, setCobrando] = useState(false);
   const [nomeando, setNomeando] = useState(false);
   /** faixa de atalhos recolhida: devolve altura para a grade e o carrinho */
@@ -225,10 +229,14 @@ function VendasPage() {
   const lancar = useCallback((p: Produto, r?: PrecoResolvido) => {
     setCarrinho((atual) => {
       /* Só o preço fixo agrupa: duas pesagens diferentes são duas linhas. */
-      if (!r) {
-        const existe = atual.find((l) => l.uid === p.id);
-        if (existe) return atual.map((l) => (l.uid === p.id ? { ...l, qtd: l.qtd + 1 } : l));
-        return [...atual, { ...p, uid: p.id, qtd: 1 }];
+      if (!r || r.chave) {
+        const uid = r?.chave ?? p.id;
+        const existe = atual.find((l) => l.uid === uid);
+        if (existe) return atual.map((l) => (l.uid === uid ? { ...l, qtd: l.qtd + 1 } : l));
+        return [
+          ...atual,
+          { ...p, uid, qtd: 1, ...(r ? { preco: r.preco, rotulo: r.rotulo } : {}) },
+        ];
       }
       return [
         ...atual,
@@ -250,6 +258,11 @@ function VendasPage() {
 
   const adicionar = useCallback(
     (p: Produto) => {
+      if (p.opcoes?.length) {
+        setOpcaoEscolhida(null);
+        setOpcaoDe(p);
+        return;
+      }
       if (modoDoProduto(p) === "fixed") lancar(p);
       else setPrecoDe(p);
     },
@@ -965,14 +978,44 @@ function VendasPage() {
         />
       ) : null}
 
+      {opcaoDe ? (
+        <ModalOpcao
+          produto={opcaoDe}
+          url={urlDe(opcaoDe.foto)}
+          onFechar={() => setOpcaoDe(null)}
+          onEscolher={(o) => {
+            const p = opcaoDe;
+            setOpcaoDe(null);
+            if (modoDoProduto(p) === "fixed") {
+              lancar(p, {
+                preco: p.preco,
+                rotulo: `${p.nome} — ${o}`,
+                qtd: 1,
+                chave: `${p.id}:${o}`,
+              });
+              return;
+            }
+            setOpcaoEscolhida(o);
+            setPrecoDe(p);
+          }}
+        />
+      ) : null}
+
       {precoDe ? (
         <ModalPreco
           produto={precoDe}
           url={urlDe(precoDe.foto)}
-          onFechar={() => setPrecoDe(null)}
-          onConfirmar={(r) => {
-            lancar(precoDe, r);
+          onFechar={() => {
             setPrecoDe(null);
+            setOpcaoEscolhida(null);
+          }}
+          onConfirmar={(r) => {
+            lancar(precoDe, {
+              ...r,
+              rotulo: opcaoEscolhida ? `${r.rotulo} — ${opcaoEscolhida}` : r.rotulo,
+            });
+            setPrecoDe(null);
+            setOpcaoEscolhida(null);
           }}
         />
       ) : null}

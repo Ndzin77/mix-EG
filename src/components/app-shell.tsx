@@ -1,17 +1,26 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { BarChart3, ChefHat, Lock, LogOut, ReceiptText, Settings, ShoppingCart, Wallet } from "lucide-react";
+import {
+  BarChart3,
+  ChefHat,
+  Lock,
+  LogOut,
+  ReceiptText,
+  Settings,
+  ShoppingCart,
+  Wallet,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import logoAsset from "@/assets/eg-mix-logo.png.asset.json";
 import { useSincronizarOffline } from "@/lib/offline";
+import { useImagem } from "@/lib/imagens";
 import { cn } from "@/lib/utils";
 import { useConfig } from "@/lib/config";
 import type { Secao } from "@/lib/travas";
 
-
 const nav = [
-  { to: "/", label: "Vendas", icon: ShoppingCart, secao: null },
+  { to: "/vendas", label: "Vendas", icon: ShoppingCart, secao: null },
   { to: "/preparo", label: "Preparo", icon: ChefHat, secao: null, experimental: true },
   { to: "/saidas", label: "Saídas", icon: ReceiptText, secao: "saidas" },
   { to: "/caixa", label: "Caixa", icon: Wallet, secao: "caixa" },
@@ -25,27 +34,21 @@ const nav = [
   experimental?: boolean;
 }[];
 
-
 /**
  * Command center: rail de navegação fixo à esquerda, área de trabalho densa no
  * centro e coluna opcional à direita (comandas). Nada de espaço morto.
  */
-export function AppShell({
-  aside,
-  children,
-}: {
-  aside?: ReactNode;
-  children: ReactNode;
-}) {
+export function AppShell({ aside, children }: { aside?: ReactNode; children: ReactNode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [config] = useConfig();
   /* A fila de preparo é opcional: só aparece no menu quando a loja liga. */
   const itens = nav.filter((i) => !("experimental" in i && i.experimental) || config.preparoAtivo);
   const trancada = (secao: Secao | null) => Boolean(secao && config.bloqueios?.[secao]);
+  /* A logo cadastrada no Admin manda; a marca de fábrica é só reserva. */
+  const logo = useImagem(config.logoUrl) ?? logoAsset.url;
   /* Fila offline ligada em toda tela logada: sobe o que ficou esperando. */
   useSincronizarOffline();
-
 
   async function sair() {
     await queryClient.cancelQueries();
@@ -58,9 +61,9 @@ export function AppShell({
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <nav className="hidden w-20 shrink-0 flex-col items-center gap-6 bg-sidebar py-5 md:flex">
         <img
-          src={logoAsset.url}
-          alt="Logo EG Mix Sorveteria e Confeitaria"
-          className="size-12 shrink-0 rounded-full ring-2 ring-primary shadow-lg"
+          src={logo}
+          alt={`Logo ${config.nomeLoja}`}
+          className="fade-in size-12 shrink-0 rounded-full object-cover ring-2 ring-primary shadow-lg"
         />
 
         <div className="flex flex-col gap-3">
@@ -68,7 +71,7 @@ export function AppShell({
             <Link
               key={item.to}
               to={item.to}
-              activeOptions={{ exact: item.to === "/" }}
+              activeOptions={{ exact: true }}
               className={cn(
                 "flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-xl",
                 "bg-sidebar-accent/40 text-sidebar-foreground/60 transition-colors",
@@ -101,7 +104,28 @@ export function AppShell({
         </button>
       </nav>
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">{children}</main>
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Celular: a marca da loja fica no mesmo canto do olho, sempre. */}
+        <div className="flex h-12 shrink-0 items-center gap-2.5 bg-sidebar px-3 md:hidden">
+          <img
+            src={logo}
+            alt={`Logo ${config.nomeLoja}`}
+            className="size-8 shrink-0 rounded-full object-cover ring-2 ring-primary"
+          />
+          <span className="min-w-0 flex-1 truncate font-display text-lg leading-none tracking-wide text-sidebar-foreground">
+            {config.nomeLoja}
+          </span>
+          <button
+            type="button"
+            onClick={sair}
+            aria-label="Sair da conta"
+            className="grid size-9 shrink-0 place-items-center rounded-lg bg-sidebar-accent/40 text-sidebar-foreground/70"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
+        {children}
+      </main>
 
       {aside ? (
         <aside className="hidden w-80 shrink-0 flex-col border-l border-border bg-secondary/40 lg:flex">
@@ -117,7 +141,7 @@ export function AppShell({
           <Link
             key={item.to}
             to={item.to}
-            activeOptions={{ exact: item.to === "/" }}
+            activeOptions={{ exact: true }}
             className="flex touch-target flex-col items-center justify-center gap-1 text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/60"
             activeProps={{ className: "text-sidebar-primary" }}
           >

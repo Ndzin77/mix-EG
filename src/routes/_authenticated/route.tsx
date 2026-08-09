@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
+import { AvisoAssinatura } from "@/components/aviso-assinatura";
 import { useSincronizarConfig } from "@/lib/use-config-sync";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -16,6 +17,11 @@ export const Route = createFileRoute("/_authenticated")({
  *  Sem isso, mexer em categoria no Admin gravava só no navegador. */
 function LayoutAutenticado() {
   useSincronizarConfig();
-  return <Outlet />;
+  return (
+    <>
+      <Outlet />
+      <AvisoAssinatura />
+    </>
+  );
 }
 

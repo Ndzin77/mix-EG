@@ -9,15 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedCaixaRouteImport } from './routes/_authenticated/caixa'
 import { Route as AuthenticatedPreparoRouteImport } from './routes/_authenticated/preparo'
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as AuthenticatedSaidasRouteImport } from './routes/_authenticated/saidas'
+import { Route as AuthenticatedVendasRouteImport } from './routes/_authenticated/vendas'
+import { Route as BancadaTokenRouteImport } from './routes/bancada.$token'
+import { Route as ApiPublicKirvanoRouteImport } from './routes/api/public/kirvano'
 
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
@@ -26,11 +34,6 @@ const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
   id: '/admin',
@@ -57,27 +60,49 @@ const AuthenticatedSaidasRoute = AuthenticatedSaidasRouteImport.update({
   path: '/saidas',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedVendasRoute = AuthenticatedVendasRouteImport.update({
+  id: '/vendas',
+  path: '/vendas',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const BancadaTokenRoute = BancadaTokenRouteImport.update({
+  id: '/bancada/$token',
+  path: '/bancada/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicKirvanoRoute = ApiPublicKirvanoRouteImport.update({
+  id: '/api/public/kirvano',
+  path: '/api/public/kirvano',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof AuthenticatedIndexRoute
+  '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/caixa': typeof AuthenticatedCaixaRoute
   '/preparo': typeof AuthenticatedPreparoRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/saidas': typeof AuthenticatedSaidasRoute
+  '/vendas': typeof AuthenticatedVendasRoute
+  '/bancada/$token': typeof BancadaTokenRoute
+  '/api/public/kirvano': typeof ApiPublicKirvanoRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/admin': typeof AuthenticatedAdminRoute
   '/caixa': typeof AuthenticatedCaixaRoute
   '/preparo': typeof AuthenticatedPreparoRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
   '/saidas': typeof AuthenticatedSaidasRoute
-  '/': typeof AuthenticatedIndexRoute
+  '/vendas': typeof AuthenticatedVendasRoute
+  '/bancada/$token': typeof BancadaTokenRoute
+  '/api/public/kirvano': typeof ApiPublicKirvanoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/admin': typeof AuthenticatedAdminRoute
@@ -85,17 +110,38 @@ export interface FileRoutesById {
   '/_authenticated/preparo': typeof AuthenticatedPreparoRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
   '/_authenticated/saidas': typeof AuthenticatedSaidasRoute
-  '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/_authenticated/vendas': typeof AuthenticatedVendasRoute
+  '/bancada/$token': typeof BancadaTokenRoute
+  '/api/public/kirvano': typeof ApiPublicKirvanoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/auth' | '/admin' | '/caixa' | '/preparo' | '/relatorios' | '/saidas'
+    | '/'
+    | '/auth'
+    | '/admin'
+    | '/caixa'
+    | '/preparo'
+    | '/relatorios'
+    | '/saidas'
+    | '/vendas'
+    | '/bancada/$token'
+    | '/api/public/kirvano'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/auth' | '/admin' | '/caixa' | '/preparo' | '/relatorios' | '/saidas' | '/'
+    | '/'
+    | '/auth'
+    | '/admin'
+    | '/caixa'
+    | '/preparo'
+    | '/relatorios'
+    | '/saidas'
+    | '/vendas'
+    | '/bancada/$token'
+    | '/api/public/kirvano'
   id:
     | '__root__'
+    | '/'
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/admin'
@@ -103,16 +149,28 @@ export interface FileRouteTypes {
     | '/_authenticated/preparo'
     | '/_authenticated/relatorios'
     | '/_authenticated/saidas'
-    | '/_authenticated/'
+    | '/_authenticated/vendas'
+    | '/bancada/$token'
+    | '/api/public/kirvano'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  BancadaTokenRoute: typeof BancadaTokenRoute
+  ApiPublicKirvanoRoute: typeof ApiPublicKirvanoRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated': {
       id: '/_authenticated'
       path: ''
@@ -126,13 +184,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/': {
-      id: '/_authenticated/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof AuthenticatedIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/admin': {
       id: '/_authenticated/admin'
@@ -169,6 +220,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSaidasRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/vendas': {
+      id: '/_authenticated/vendas'
+      path: '/vendas'
+      fullPath: '/vendas'
+      preLoaderRoute: typeof AuthenticatedVendasRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/bancada/$token': {
+      id: '/bancada/$token'
+      path: '/bancada/$token'
+      fullPath: '/bancada/$token'
+      preLoaderRoute: typeof BancadaTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/kirvano': {
+      id: '/api/public/kirvano'
+      path: '/api/public/kirvano'
+      fullPath: '/api/public/kirvano'
+      preLoaderRoute: typeof ApiPublicKirvanoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -178,7 +250,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPreparoRoute: typeof AuthenticatedPreparoRoute
   AuthenticatedRelatoriosRoute: typeof AuthenticatedRelatoriosRoute
   AuthenticatedSaidasRoute: typeof AuthenticatedSaidasRoute
-  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+  AuthenticatedVendasRoute: typeof AuthenticatedVendasRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -187,15 +259,18 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPreparoRoute: AuthenticatedPreparoRoute,
   AuthenticatedRelatoriosRoute: AuthenticatedRelatoriosRoute,
   AuthenticatedSaidasRoute: AuthenticatedSaidasRoute,
-  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+  AuthenticatedVendasRoute: AuthenticatedVendasRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
   AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  BancadaTokenRoute: BancadaTokenRoute,
+  ApiPublicKirvanoRoute: ApiPublicKirvanoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

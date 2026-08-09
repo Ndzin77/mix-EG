@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Printer, ReceiptText } from "lucide-react";
+import { Minus, Plus, Printer, ReceiptText } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "@/components/modal";
 import { FolhaRecibo } from "@/components/recibo/recibo";
@@ -63,11 +63,22 @@ function Grupo({ titulo, children }: { titulo: string; children: React.ReactNode
     </section>
   );
 }
+/** Uma pergunta por vez: a rolagem fica curta e o papel do lado não some. */
+type Aba = "papel" | "cabecalho" | "corpo" | "rodape";
+const abas: { chave: Aba; rotulo: string }[] = [
+  { chave: "papel", rotulo: "Papel" },
+  { chave: "cabecalho", rotulo: "Cabeçalho" },
+  { chave: "corpo", rotulo: "Corpo" },
+  { chave: "rodape", rotulo: "Rodapé" },
+];
+
 
 /** Cartão do Admin + editor com pré-visualização ao vivo do papel. */
 export function CartaoRecibo() {
   const [config, setConfig] = useConfig();
   const [aberto, setAberto] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [aba, setAba] = useState<Aba>("papel");
   const r: ReciboConfig = { ...reciboPadrao, ...(config.recibo ?? {}) };
   const set = (patch: Partial<ReciboConfig>) => setConfig({ recibo: { ...r, ...patch } });
 
@@ -125,8 +136,30 @@ export function CartaoRecibo() {
             </>
           }
         >
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto]">
-            <div>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+            {/* Coluna das opções: rola sozinha, para o papel do lado nunca
+                sair do campo de visão enquanto a dona mexe nas chaves. */}
+            <div className="order-2 flex min-h-0 flex-col lg:order-1 lg:h-[64vh]">
+              <div className="sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto bg-card/95 px-1 pb-2 backdrop-blur">
+                {abas.map((a) => (
+                  <button
+                    key={a.chave}
+                    type="button"
+                    onClick={() => setAba(a.chave)}
+                    className={cn(
+                      "press h-10 shrink-0 rounded-xl border-2 px-3 text-xs font-black uppercase tracking-wide",
+                      aba === a.chave
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-secondary/40 text-muted-foreground",
+                    )}
+                  >
+                    {a.rotulo}
+                  </button>
+                ))}
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+              {aba === "papel" ? (
               <section className="rounded-xl border border-border p-3">
                 <span className="eyebrow text-muted-foreground">Papel</span>
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -164,7 +197,9 @@ export function CartaoRecibo() {
                   ))}
                 </div>
               </section>
+              ) : null}
 
+              {aba === "cabecalho" ? (
               <Grupo titulo="Cabeçalho">
                 <Chave
                   rotulo="Logo da loja"
@@ -176,7 +211,9 @@ export function CartaoRecibo() {
                   <input
                     inputMode="numeric"
                     value={String(r.tamanhoLogo)}
-                    onChange={(e) => set({ tamanhoLogo: Number(inteiro(e.target.value, 240)) || 0 })}
+                    onChange={(e) =>
+                      set({ tamanhoLogo: Number(inteiro(e.target.value, 240)) || 0 })
+                    }
                     className={cn(campo, "money")}
                   />
                 </label>
@@ -195,7 +232,11 @@ export function CartaoRecibo() {
                   valor={r.mostrarEndereco}
                   onChange={(v) => set({ mostrarEndereco: v })}
                 />
-                <Chave rotulo="CNPJ" valor={r.mostrarCnpj} onChange={(v) => set({ mostrarCnpj: v })} />
+                <Chave
+                  rotulo="CNPJ"
+                  valor={r.mostrarCnpj}
+                  onChange={(v) => set({ mostrarCnpj: v })}
+                />
                 <label className="text-sm font-bold">
                   CNPJ
                   <input
@@ -235,7 +276,9 @@ export function CartaoRecibo() {
                   />
                 </label>
               </Grupo>
+              ) : null}
 
+              {aba === "corpo" ? (
               <Grupo titulo="Corpo">
                 <Chave
                   rotulo="Nº do recibo"
@@ -277,9 +320,15 @@ export function CartaoRecibo() {
                   valor={r.mostrarRecebido}
                   onChange={(v) => set({ mostrarRecebido: v })}
                 />
-                <Chave rotulo="Troco" valor={r.mostrarTroco} onChange={(v) => set({ mostrarTroco: v })} />
+                <Chave
+                  rotulo="Troco"
+                  valor={r.mostrarTroco}
+                  onChange={(v) => set({ mostrarTroco: v })}
+                />
               </Grupo>
+              ) : null}
 
+              {aba === "rodape" ? (
               <Grupo titulo="Rodapé">
                 <label className="text-sm font-bold sm:col-span-2">
                   Mensagem impressa
@@ -305,22 +354,66 @@ export function CartaoRecibo() {
                   <input
                     inputMode="numeric"
                     value={String(r.linhasBrancas)}
-                    onChange={(e) => set({ linhasBrancas: Number(inteiro(e.target.value, 12)) || 0 })}
+                    onChange={(e) =>
+                      set({ linhasBrancas: Number(inteiro(e.target.value, 12)) || 0 })
+                    }
                     className={cn(campo, "money")}
                   />
                 </label>
               </Grupo>
+              ) : null}
+              </div>
             </div>
 
-            <div className="lg:sticky lg:top-0">
-              <span className="eyebrow text-muted-foreground">Como vai sair</span>
-              <div className="print-area mt-2 overflow-x-auto rounded-xl bg-secondary/50 p-3 shadow-inner">
-                <FolhaRecibo
-                  dados={exemplo}
-                  loja={{ ...config, recibo: r }}
-                  formato={r.largura === "a4" ? "a4" : "bobina"}
-                />
+            {/* Espelho do papel: fica colado no topo para a mudança acontecer
+                dentro do campo de visão, no mesmo instante do clique. */}
+            <div className="order-1 lg:order-2 lg:sticky lg:top-0">
+              <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 bg-card/95 pb-2 backdrop-blur">
+                <span className="eyebrow truncate text-muted-foreground">
+                  Como vai sair · {r.largura === "a4" ? "A4" : `bobina ${r.largura}`}
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Diminuir a visualização"
+                    onClick={() =>
+                      setZoom((z) => Math.max(0.6, Math.round((z - 0.15) * 100) / 100))
+                    }
+                    className="press grid size-9 place-items-center rounded-lg border-2 border-border font-black"
+                  >
+                    <Minus className="size-4" />
+                  </button>
+                  <span className="money w-12 text-center text-xs tabular-nums text-muted-foreground">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Aumentar a visualização"
+                    onClick={() =>
+                      setZoom((z) => Math.min(1.6, Math.round((z + 0.15) * 100) / 100))
+                    }
+                    className="press grid size-9 place-items-center rounded-lg border-2 border-border font-black"
+                  >
+                    <Plus className="size-4" />
+                  </button>
+                </div>
               </div>
+
+              <div className="overflow-auto rounded-2xl bg-[repeating-linear-gradient(45deg,var(--color-secondary)_0_10px,transparent_10px_20px)] p-4 shadow-inner">
+                <div
+                  className="print-area mx-auto w-fit origin-top bg-white shadow-2xl ring-1 ring-black/10 transition-transform duration-200"
+                  style={{ transform: `scale(${zoom})` }}
+                >
+                  <FolhaRecibo
+                    dados={exemplo}
+                    loja={{ ...config, recibo: r }}
+                    formato={r.largura === "a4" ? "a4" : "bobina"}
+                  />
+                </div>
+              </div>
+              <p className="mt-2 text-center text-[0.6875rem] font-bold text-muted-foreground">
+                Papel de verdade, com uma venda de exemplo — muda a cada toque.
+              </p>
             </div>
           </div>
         </Modal>

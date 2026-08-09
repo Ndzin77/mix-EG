@@ -72,6 +72,7 @@ export type Database = {
           id: string
           order_id: string
           prep_done_at: string | null
+          prep_ordem: number | null
           prep_started_at: string | null
           prep_status: string
           product_id: string | null
@@ -89,6 +90,7 @@ export type Database = {
           id?: string
           order_id: string
           prep_done_at?: string | null
+          prep_ordem?: number | null
           prep_started_at?: string | null
           prep_status?: string
           product_id?: string | null
@@ -106,6 +108,7 @@ export type Database = {
           id?: string
           order_id?: string
           prep_done_at?: string | null
+          prep_ordem?: number | null
           prep_started_at?: string | null
           prep_status?: string
           product_id?: string | null
@@ -257,6 +260,7 @@ export type Database = {
           id: string
           image_url: string | null
           name: string
+          opcoes: string[]
           price: number
           price_per_kg: number
           pricing_mode: string
@@ -273,6 +277,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           name: string
+          opcoes?: string[]
           price?: number
           price_per_kg?: number
           pricing_mode?: string
@@ -289,6 +294,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           name?: string
+          opcoes?: string[]
           price?: number
           price_per_kg?: number
           pricing_mode?: string
@@ -358,6 +364,7 @@ export type Database = {
           meta_diaria: number
           phone: string | null
           preparo_ativo: boolean
+          preparo_senha: Json | null
           preparo_token: string | null
           qtd_mesas: number
           receipt_footer: string | null
@@ -383,6 +390,7 @@ export type Database = {
           meta_diaria?: number
           phone?: string | null
           preparo_ativo?: boolean
+          preparo_senha?: Json | null
           preparo_token?: string | null
           qtd_mesas?: number
           receipt_footer?: string | null
@@ -408,6 +416,7 @@ export type Database = {
           meta_diaria?: number
           phone?: string | null
           preparo_ativo?: boolean
+          preparo_senha?: Json | null
           preparo_token?: string | null
           qtd_mesas?: number
           receipt_footer?: string | null
@@ -421,6 +430,56 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "store_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      subscriptions: {
+        Row: {
+          buyer_email: string | null
+          created_at: string
+          current_period_end: string
+          kirvano_customer_id: string | null
+          kirvano_subscription_id: string | null
+          last_event: string | null
+          plan: string
+          price: number
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          buyer_email?: string | null
+          created_at?: string
+          current_period_end?: string
+          kirvano_customer_id?: string | null
+          kirvano_subscription_id?: string | null
+          last_event?: string | null
+          plan?: string
+          price?: number
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          buyer_email?: string | null
+          created_at?: string
+          current_period_end?: string
+          kirvano_customer_id?: string | null
+          kirvano_subscription_id?: string | null
+          last_event?: string | null
+          plan?: string
+          price?: number
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: true
             referencedRelation: "tenants"

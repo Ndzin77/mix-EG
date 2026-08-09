@@ -31,6 +31,8 @@ export type Produto = {
   precoKg?: number;
   /** sabores com preços diferentes dentro do mesmo produto */
   sabores?: Sabor[];
+  /** sabores que não mudam o preço: só a escolha na hora da venda */
+  opcoes?: string[];
 };
 
 /** Linha do carrinho. `uid` é a identidade da linha: duas pesagens do mesmo
@@ -50,6 +52,7 @@ export function seloPreco(p: Produto): string | null {
   if (m === "flavor") return "preço por sabor";
   if (m === "manual") return "preço na hora";
   if (m === "weight") return `R$ ${(p.precoKg ?? 0).toFixed(2).replace(".", ",")} / kg`;
+  if (p.opcoes?.length) return `${p.opcoes.length} sabores`;
   return null;
 }
 

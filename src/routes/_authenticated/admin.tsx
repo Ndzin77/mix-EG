@@ -25,7 +25,9 @@ import { useConfirmar } from "@/components/confirmar";
 import { UploadImagem } from "@/components/upload-imagem";
 import { CartaoRecibo } from "@/components/admin/cartao-recibo";
 import { CartaoSeguranca } from "@/components/admin/cartao-seguranca";
+import { CartaoAssinatura } from "@/components/admin/cartao-assinatura";
 import { CartaoInstalar } from "@/components/instalar-app";
+import { CartaoBancada } from "@/components/admin/cartao-bancada";
 import { moeda, telefone as mascaraTelefone, telefoneValido, texto } from "@/lib/campos";
 
 import { brl, urgencia, useConfig } from "@/lib/config";
@@ -87,6 +89,8 @@ type Rascunho = {
   modo: ModoPreco;
   precoKg: string;
   sabores: SaborRascunho[];
+  /** sabores que não mudam o preço: só escolha na hora da venda */
+  opcoes: string[];
 };
 
 const rascunhoVazio: Rascunho = {
@@ -100,6 +104,7 @@ const rascunhoVazio: Rascunho = {
   modo: "fixed",
   precoKg: "",
   sabores: [],
+  opcoes: [],
 };
 
 /** As quatro formas de o preço nascer, explicadas em uma frase cada. */
@@ -208,6 +213,7 @@ function AdminPage() {
               modo: v.modo,
               precoKg: v.modo === "weight" ? num(v.precoKg) : 0,
             })),
+          opcoes: r.opcoes.map((o) => o.trim()).filter(Boolean),
         },
       }),
     onSuccess: () => {
@@ -407,6 +413,7 @@ function AdminPage() {
                                           precoKg: v?.precoKg ? brl(Number(v.precoKg)) : "",
                                         }))
                                       : [],
+                                    opcoes: Array.isArray(p.opcoes) ? (p.opcoes as string[]) : [],
                                   })
                                 }
                                 className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
@@ -466,6 +473,8 @@ function AdminPage() {
 
             <CartaoRecibo />
 
+            <CartaoAssinatura />
+
             <CartaoSeguranca />
 
             {/* Fila de preparo: experimental, entra só quando a loja quiser. */}
@@ -489,7 +498,9 @@ function AdminPage() {
                   </span>
                 </span>
               </label>
+              {config.preparoAtivo ? <CartaoBancada /> : null}
             </section>
+
 
             <CartaoInstalar />
 
@@ -804,6 +815,57 @@ function AdminPage() {
                 </span>
               </label>
             ) : null}
+
+            {/* Sabores que não mexem no preço: só a escolha na hora da venda. */}
+            {rascunho.modo !== "flavor" ? (
+              <div className="sm:col-span-2">
+                <span className="text-sm font-bold">Sabores / opções (mesmo preço)</span>
+                <p className="text-xs font-normal text-muted-foreground">
+                  Ex.: morango, uva, chocolate. Na venda o caixa escolha qual é — o preço não muda.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {rascunho.opcoes.map((o, i) => (
+                    <span
+                      key={`${o}-${i}`}
+                      className="flex h-10 items-center gap-1.5 rounded-full bg-secondary pl-3 pr-1.5 text-sm font-bold"
+                    >
+                      {o}
+                      <button
+                        type="button"
+                        aria-label={`Remover ${o}`}
+                        onClick={() =>
+                          setRascunho({
+                            ...rascunho,
+                            opcoes: rascunho.opcoes.filter((_, k) => k !== i),
+                          })
+                        }
+                        className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <input
+                  placeholder="Digite um sabor e aperte Enter"
+                  aria-label="Novo sabor sem mudança de preço"
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const v = e.currentTarget.value.trim();
+                    if (!v) return;
+                    if (rascunho.opcoes.some((o) => o.toLowerCase() === v.toLowerCase())) {
+                      return toast.error("Esse sabor já está na lista");
+                    }
+                    setRascunho({ ...rascunho, opcoes: [...rascunho.opcoes, v] });
+                    e.currentTarget.value = "";
+                  }}
+                  className={campo}
+                />
+              </div>
+            ) : null}
+
+
 
             {rascunho.modo === "flavor" ? (
               <div className="sm:col-span-2">

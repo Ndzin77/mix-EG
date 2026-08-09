@@ -102,7 +102,7 @@ export function TravaSecao({
         </button>
         <button
           type="button"
-          onClick={() => navigate({ to: "/" })}
+          onClick={() => navigate({ to: "/vendas" })}
           className="press mt-2 h-12 w-full rounded-xl border-2 border-border font-bold text-muted-foreground hover:border-primary"
         >
           Voltar para Vendas
