@@ -17,13 +17,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Venda rápida no balcão, caixa fechando certo e funciona sem internet. Para lanchonete, sorveteria, açaí, padaria e food truck. R$ 39,90 por mês, sem fidelidade.",
+          "Venda rápida no balcão, caixa fechando certo e funciona sem internet. Para lanchonete, sorveteria, açaí, padaria por R$ 39,90 por mês, sem fidelidade.",
       },
       { property: "og:title", content: "Gestor Pro — venda no balcão e caixa certo, R$ 39,90/mês" },
       {
         property: "og:description",
         content:
-          "Venda em 3 toques, caixa fechado no fim do dia e funciona offline. Sem fidelidade.",
+          "Venda em 3 toques, caixa fechado no fim do dia e funciona offline.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -205,7 +205,7 @@ function ModalCadastro({ onFechar }: { onFechar: () => void }) {
             <input
               autoFocus
               value={f.loja}
-              placeholder="EG Mix Sorveteria"
+              placeholder="panificadora Deus é fiel"
               onChange={(e) => setF({ ...f, loja: e.target.value.slice(0, 80) })}
               className={campo}
             />
