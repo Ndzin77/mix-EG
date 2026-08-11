@@ -87,12 +87,24 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
       });
     }
 
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims?.sub) {
-      throw new Error("Sessão expirada. Entre novamente.");
+    /* `getClaims` valida o token localmente e compara com o relógio da
+       máquina. Se o servidor está alguns segundos atrasado, um token recém
+       emitido é recusado com "JWT issued at future". Nesse caso (e em
+       qualquer falha de verificação local) confirmamos com o próprio
+       Supabase, que é a fonte da verdade. */
+    let claims: Record<string, unknown> | null = null;
+
+    const local = await supabase.auth.getClaims(token).catch(() => null);
+    if (local?.data?.claims?.sub) {
+      claims = local.data.claims as Record<string, unknown>;
+    } else {
+      const { data: usuario, error: erroUsuario } = await supabase.auth.getUser(token);
+      if (erroUsuario || !usuario?.user?.id) {
+        throw new Error("Sessão expirada. Entre novamente.");
+      }
+      claims = { sub: usuario.user.id, email: usuario.user.email };
     }
 
-    const claims = data.claims as Record<string, unknown>;
     guardar(token, claims.sub as string, claims, typeof claims.exp === "number" ? claims.exp : undefined);
 
     return next({

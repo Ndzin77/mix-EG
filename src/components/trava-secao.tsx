@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { KeyRound, Lock, ShieldAlert } from "lucide-react";
+import { toast } from "sonner";
 import { useConfig } from "@/lib/config";
-import { senhaConfere, type Secao } from "@/lib/travas";
+import { confirmarSenhaLogin } from "@/lib/conta.functions";
+import { criarTrava, erroSenha, senhaConfere, senhaValida, type Secao } from "@/lib/travas";
 import { cn } from "@/lib/utils";
+
 
 /**
  * Porta da seção. Se a loja pôs cadeado nesta tela, nada do conteúdo é
@@ -19,15 +23,45 @@ export function TravaSecao({
   titulo: string;
   children: ReactNode;
 }) {
-  const [config] = useConfig();
+  const [config, setConfig] = useConfig();
   const navigate = useNavigate();
   const trava = config.bloqueios?.[secao];
+  const conferirLogin = useServerFn(confirmarSenhaLogin);
 
   const [liberado, setLiberado] = useState(false);
   const [senha, setSenha] = useState("");
   const [erro, setErro] = useState(false);
   const [conferindo, setConferindo] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
+
+  /* Esqueceu a senha desta tela? A senha do login é a chave-mestra: sem ela
+     ninguém entra, com ela dá para gravar uma senha nova aqui mesmo. */
+  const [recuperando, setRecuperando] = useState(false);
+  const [senhaLogin, setSenhaLogin] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [salvandoNova, setSalvandoNova] = useState(false);
+
+  const regravar = async () => {
+    if (salvandoNova) return;
+    const problema = erroSenha(novaSenha);
+    if (problema) return toast.error(problema);
+    setSalvandoNova(true);
+    try {
+      await conferirLogin({ data: { senha: senhaLogin } });
+      const nova = await criarTrava(novaSenha);
+      setConfig({ bloqueios: { ...(config.bloqueios ?? {}), [secao]: nova } });
+      toast.success("Senha desta tela trocada.");
+      setRecuperando(false);
+      setSenhaLogin("");
+      setNovaSenha("");
+      setLiberado(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "A senha do login não confere.");
+    } finally {
+      setSalvandoNova(false);
+    }
+  };
+
 
   useEffect(() => {
     campo.current?.focus();
@@ -100,6 +134,49 @@ export function TravaSecao({
         >
           {conferindo ? "Conferindo…" : "Abrir"}
         </button>
+
+        {recuperando ? (
+          <div className="modal-in mt-4 rounded-2xl border-2 border-border bg-secondary/30 p-4 text-left">
+            <p className="text-sm font-bold">Trocar a senha desta tela</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Confirme a senha do seu login e escolha uma senha nova só para {titulo}.
+            </p>
+            <input
+              type="password"
+              value={senhaLogin}
+              onChange={(e) => setSenhaLogin(e.target.value)}
+              placeholder="Senha do login"
+              aria-label="Senha do login"
+              className="mt-3 h-13 w-full rounded-xl border-2 border-border bg-card px-4 text-base outline-none focus:border-primary"
+            />
+            <input
+              type="password"
+              value={novaSenha}
+              onChange={(e) => setNovaSenha(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void regravar()}
+              placeholder={`Senha nova de ${titulo}`}
+              aria-label={`Senha nova de ${titulo}`}
+              className="mt-2 h-13 w-full rounded-xl border-2 border-border bg-card px-4 text-base outline-none focus:border-primary"
+            />
+            <button
+              type="button"
+              onClick={() => void regravar()}
+              disabled={!senhaLogin || !senhaValida(novaSenha) || salvandoNova}
+              className="press mt-3 h-13 w-full rounded-xl bg-primary font-bold text-primary-foreground disabled:opacity-40"
+            >
+              {salvandoNova ? "Conferindo…" : "Gravar senha nova e abrir"}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setRecuperando(true)}
+            className="press mt-3 h-11 w-full rounded-xl text-sm font-bold text-muted-foreground hover:text-foreground"
+          >
+            Esqueci a senha desta tela
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => navigate({ to: "/vendas" })}
@@ -107,6 +184,7 @@ export function TravaSecao({
         >
           Voltar para Vendas
         </button>
+
       </div>
     </div>
   );

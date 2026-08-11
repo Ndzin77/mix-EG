@@ -105,7 +105,7 @@ function RelatoriosPage() {
     }
   }
 
-  const margem = data?.entradas ? Math.round((data.resultado / data.entradas) * 100) : 0;
+  
   const top = data?.top ?? [];
   const formas = Object.entries(data?.formas ?? {}).filter(([, v]) => v > 0);
   const categorias = Object.entries(data?.saidasPorCategoria ?? {});
@@ -194,9 +194,9 @@ function RelatoriosPage() {
                     R$ {brl(Math.abs(data.resultado))}
                   </p>
                   <p className="mt-1 text-xs font-bold text-muted-foreground">
-                    margem {margem}% · {data.vendas} venda{data.vendas === 1 ? "" : "s"} · ticket R${" "}
-                    {brl(data.ticket)}
+                    {data.vendas} venda{data.vendas === 1 ? "" : "s"} · ticket R$ {brl(data.ticket)}
                   </p>
+
                 </article>
               </div>
 

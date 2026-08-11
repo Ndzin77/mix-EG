@@ -8,8 +8,10 @@ import {
   IceCream,
   ImagePlus,
   Loader2,
+  Lock,
   Pencil,
   Plus,
+  Printer,
   Scale,
   Store,
   Tag,
@@ -17,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+
 import { toast } from "sonner";
 import { AppShell, PageHeader } from "@/components/app-shell";
 import { TravaSecao } from "@/components/trava-secao";
@@ -25,7 +28,7 @@ import { useConfirmar } from "@/components/confirmar";
 import { UploadImagem } from "@/components/upload-imagem";
 import { CartaoRecibo } from "@/components/admin/cartao-recibo";
 import { CartaoSeguranca } from "@/components/admin/cartao-seguranca";
-import { CartaoAssinatura } from "@/components/admin/cartao-assinatura";
+
 import { CartaoInstalar } from "@/components/instalar-app";
 import { CartaoBancada } from "@/components/admin/cartao-bancada";
 import { moeda, telefone as mascaraTelefone, telefoneValido, texto } from "@/lib/campos";
@@ -135,6 +138,17 @@ const modosPreco: { valor: ModoPreco; titulo: string; frase: string; icone: type
   },
 ];
 
+/* Uma decisão por vez: quatro assuntos, um visível de cada vez. Rolagem
+   infinita cansa e esconde; aba escolhida some o resto. */
+type Aba = "cardapio" | "loja" | "recibo" | "seguranca";
+
+const abas: { valor: Aba; titulo: string; icone: typeof Tag }[] = [
+  { valor: "cardapio", titulo: "Cardápio", icone: IceCream },
+  { valor: "loja", titulo: "Loja", icone: Store },
+  { valor: "recibo", titulo: "Recibo", icone: Printer },
+  { valor: "seguranca", titulo: "Segurança", icone: Lock },
+];
+
 const num = (v: string) => Number(String(v).replace(",", ".")) || 0;
 
 const campo =
@@ -163,6 +177,7 @@ function AdminPage() {
   /* Um modal por assunto: a página fica um painel de cartões, não um formulário
      rolante. Quem entra para mexer numa coisa não passa pelas outras cinco. */
   const [rascunho, setRascunho] = useState<Rascunho | null>(null);
+  const [aba, setAba] = useState<Aba>("cardapio");
   const [editandoLoja, setEditandoLoja] = useState(false);
   const [editandoTempos, setEditandoTempos] = useState(false);
   const [novaCategoria, setNovaCategoria] = useState("");
@@ -300,373 +315,416 @@ function AdminPage() {
       <TravaSecao secao="admin" titulo="Admin">
       <PageHeader title="Admin" subtitle="Produtos, loja, categorias e comandas" />
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-5 pb-24 md:pb-5">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          <section className="rounded-2xl border-l-4 border-primary bg-card p-6 shadow-sm">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <span className="eyebrow text-primary">Cardápio</span>
-                <h2 className="mt-1 font-display text-2xl tracking-wide">
-                  {lista.length} {lista.length === 1 ? "produto" : "produtos"}
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Toque num produto para editar nome, preço, foto e tags.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRascunho(rascunhoVazio)}
-                className="press flex h-12 items-center gap-2 rounded-xl bg-primary px-5 font-bold text-primary-foreground shadow-lg"
-              >
-                <Plus className="size-5" />
-                Novo produto
-              </button>
-            </div>
+      <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-4 pt-1">
+        {abas.map((t) => {
+          const ativa = aba === t.valor;
+          return (
+            <button
+              key={t.valor}
+              type="button"
+              onClick={() => setAba(t.valor)}
+              className={cn(
+                "press relative flex h-14 shrink-0 items-center gap-2 rounded-t-xl px-4 text-sm font-bold transition-colors",
+                ativa
+                  ? "text-primary"
+                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
+              )}
+            >
+              <t.icone className="size-4" />
+              {t.titulo}
+              <span
+                className={cn(
+                  "absolute inset-x-2 bottom-0 h-1 rounded-t-full transition-transform",
+                  ativa ? "scale-x-100 bg-primary" : "scale-x-0 bg-transparent",
+                )}
+              />
+            </button>
+          );
+        })}
+      </nav>
 
-            {produtos.isError ? (
-              <div className="mt-6">
-                <AvisoErro erro={produtos.error} aoTentar={() => produtos.refetch()} />
-              </div>
-            ) : produtos.isLoading ? (
-              <p className="mt-6 text-sm text-muted-foreground">Carregando produtos…</p>
-            ) : lista.length === 0 ? (
-              <div className="mt-6 rounded-xl border-2 border-dashed border-border p-8 text-center">
-                <p className="font-display text-2xl tracking-wide">Cardápio vazio</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Cadastre o primeiro sabor — com foto, ele já aparece bonito na tela de vendas.
-                </p>
-              </div>
-            ) : (
-              <div className="mt-5 space-y-5">
-                {grupos.map(([grupo, itens]) => (
-                  <div key={grupo}>
-                    <div className="mb-2 flex items-center gap-2">
-                      <span className="eyebrow text-muted-foreground">{grupo}</span>
-                      <span className="h-px flex-1 bg-border" />
-                      <span className="text-[0.6875rem] font-bold tabular-nums text-muted-foreground/70">
-                        {itens.length}
-                      </span>
-                    </div>
-                    <ul className="overflow-hidden rounded-xl border border-border">
-                      {itens.map((p) => {
-                        const foto = urlDe(p.image_url);
-                        return (
-                          <li
-                            key={p.id}
-                            className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
-                          >
-                            <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary/60">
-                              {foto ? (
-                                <img src={foto} alt="" className="size-full object-cover" />
-                              ) : (
-                                <IceCream className="size-5 text-muted-foreground" />
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate font-bold leading-tight">
-                                {p.name}
-                                {p.active ? null : (
-                                  <span className="ml-2 rounded bg-foreground/8 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    inativo
-                                  </span>
-                                )}
-                              </span>
-                              <span className="block truncate text-xs text-muted-foreground">
-                                {[p.code && `Cód. ${p.code}`, (p.tags ?? []).join(" · ")]
-                                  .filter(Boolean)
-                                  .join(" · ") || "sem tags"}
-                              </span>
-                            </span>
-                            <span className="money shrink-0 text-xl leading-none">
-                              R$ {brl(Number(p.price))}
-                            </span>
-                            <span className="flex shrink-0 gap-1">
-                              <button
-                                type="button"
-                                aria-label={`Editar ${p.name}`}
-                                onClick={() =>
-                                  setRascunho({
-                                    id: p.id,
-                                    name: p.name,
-                                    code: p.code ?? "",
-                                    category: p.category ?? "",
-                                    tags: (p.tags ?? []).join(", "),
-                                    price: String(p.price),
-                                    active: p.active,
-                                    image_url: p.image_url ?? "",
-                                    modo: (p.pricing_mode ?? "fixed") as ModoPreco,
-                                    precoKg: String(p.price_per_kg ?? 0),
-                                    sabores: Array.isArray(p.variants)
-                                      ? (
-                                          p.variants as {
-                                            nome?: string;
-                                            preco?: number;
-                                            modo?: string;
-                                            precoKg?: number;
-                                          }[]
-                                        ).map((v) => ({
-                                          nome: String(v?.nome ?? ""),
-                                          preco: v?.preco ? brl(Number(v.preco)) : "",
-                                          modo: (v?.modo === "manual" || v?.modo === "weight"
-                                            ? v.modo
-                                            : "fixed") as Exclude<ModoPreco, "flavor">,
-                                          precoKg: v?.precoKg ? brl(Number(v.precoKg)) : "",
-                                        }))
-                                      : [],
-                                    opcoes: Array.isArray(p.opcoes) ? (p.opcoes as string[]) : [],
-                                  })
-                                }
-                                className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
-                              >
-                                <Pencil className="size-5" />
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`Excluir ${p.name}`}
-                                onClick={async () => {
-                                  const ok = await confirmar({
-                                    titulo: `Excluir ${p.name}?`,
-                                    descricao:
-                                      "O produto sai do cardápio de vendas. As vendas já feitas continuam no histórico.",
-                                  });
-                                  if (ok) remover.mutate(p.id);
-                                }}
-
-                                className="grid size-11 place-items-center rounded-lg text-danger hover:bg-danger-soft"
-                              >
-                                <Trash2 className="size-5" />
-                              </button>
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-24 md:p-5 md:pb-5">
+        <div key={aba} className="animate-fade-in mx-auto max-w-5xl">
+          {aba === "cardapio" ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+              <section className="rounded-2xl border border-border bg-card p-5 shadow-sm md:p-6">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <span className="eyebrow text-primary">Cardápio</span>
+                    <h2 className="mt-1 font-display text-2xl tracking-wide">
+                      {lista.length} {lista.length === 1 ? "produto" : "produtos"}
+                    </h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Toque num produto para editar nome, preço, foto e tags.
+                    </p>
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
+                  <button
+                    type="button"
+                    onClick={() => setRascunho(rascunhoVazio)}
+                    className="press flex h-12 items-center gap-2 rounded-xl bg-primary px-5 font-bold text-primary-foreground shadow-lg"
+                  >
+                    <Plus className="size-5" />
+                    Novo produto
+                  </button>
+                </div>
 
-          <div className="space-y-4">
-            {/* Dados e logo da loja: um cartão-resumo que abre o formulário. */}
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
-                <Store className="size-4" />
-                Dados da loja
-              </span>
-              <p className="mt-2 truncate font-display text-xl tracking-wide">
-                {config.nomeLoja || "Sem nome"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {[config.telefone, config.endereco].filter(Boolean).join(" · ") ||
-                  "Telefone e endereço em branco"}
-              </p>
-              <button
-                type="button"
-                onClick={() => setEditandoLoja(true)}
-                className="press mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
-              >
-                <ImagePlus className="size-4" />
-                Editar dados e logo
-              </button>
-            </section>
+                {produtos.isError ? (
+                  <div className="mt-6">
+                    <AvisoErro erro={produtos.error} aoTentar={() => produtos.refetch()} />
+                  </div>
+                ) : produtos.isLoading ? (
+                  <p className="mt-6 text-sm text-muted-foreground">Carregando produtos…</p>
+                ) : lista.length === 0 ? (
+                  <div className="mt-6 rounded-xl border-2 border-dashed border-border p-8 text-center">
+                    <p className="font-display text-2xl tracking-wide">Cardápio vazio</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Cadastre o primeiro sabor — com foto, ele já aparece bonito na tela de
+                      vendas.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-5">
+                    {grupos.map(([grupo, itens]) => (
+                      <div key={grupo}>
+                        <div className="mb-2 flex items-center gap-2">
+                          <span className="eyebrow text-muted-foreground">{grupo}</span>
+                          <span className="h-px flex-1 bg-border" />
+                          <span className="text-[0.6875rem] font-bold tabular-nums text-muted-foreground/70">
+                            {itens.length}
+                          </span>
+                        </div>
+                        <ul className="overflow-hidden rounded-xl border border-border">
+                          {itens.map((p) => {
+                            const foto = urlDe(p.image_url);
+                            return (
+                              <li
+                                key={p.id}
+                                className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
+                              >
+                                <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg bg-secondary/60">
+                                  {foto ? (
+                                    <img src={foto} alt="" className="size-full object-cover" />
+                                  ) : (
+                                    <IceCream className="size-5 text-muted-foreground" />
+                                  )}
+                                </span>
+                                <span className="min-w-0">
+                                  <span className="block truncate font-bold leading-tight">
+                                    {p.name}
+                                    {p.active ? null : (
+                                      <span className="ml-2 rounded bg-foreground/8 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                                        inativo
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="block truncate text-xs text-muted-foreground">
+                                    {[p.code && `Cód. ${p.code}`, (p.tags ?? []).join(" · ")]
+                                      .filter(Boolean)
+                                      .join(" · ") || "sem tags"}
+                                  </span>
+                                </span>
+                                <span className="money shrink-0 text-xl leading-none">
+                                  R$ {brl(Number(p.price))}
+                                </span>
+                                <span className="flex shrink-0 gap-1">
+                                  <button
+                                    type="button"
+                                    aria-label={`Editar ${p.name}`}
+                                    onClick={() =>
+                                      setRascunho({
+                                        id: p.id,
+                                        name: p.name,
+                                        code: p.code ?? "",
+                                        category: p.category ?? "",
+                                        tags: (p.tags ?? []).join(", "),
+                                        price: String(p.price),
+                                        active: p.active,
+                                        image_url: p.image_url ?? "",
+                                        modo: (p.pricing_mode ?? "fixed") as ModoPreco,
+                                        precoKg: String(p.price_per_kg ?? 0),
+                                        sabores: Array.isArray(p.variants)
+                                          ? (
+                                              p.variants as {
+                                                nome?: string;
+                                                preco?: number;
+                                                modo?: string;
+                                                precoKg?: number;
+                                              }[]
+                                            ).map((v) => ({
+                                              nome: String(v?.nome ?? ""),
+                                              preco: v?.preco ? brl(Number(v.preco)) : "",
+                                              modo: (v?.modo === "manual" || v?.modo === "weight"
+                                                ? v.modo
+                                                : "fixed") as Exclude<ModoPreco, "flavor">,
+                                              precoKg: v?.precoKg ? brl(Number(v.precoKg)) : "",
+                                            }))
+                                          : [],
+                                        opcoes: Array.isArray(p.opcoes)
+                                          ? (p.opcoes as string[])
+                                          : [],
+                                      })
+                                    }
+                                    className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-secondary"
+                                  >
+                                    <Pencil className="size-5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={`Excluir ${p.name}`}
+                                    onClick={async () => {
+                                      const ok = await confirmar({
+                                        titulo: `Excluir ${p.name}?`,
+                                        descricao:
+                                          "O produto sai do cardápio de vendas. As vendas já feitas continuam no histórico.",
+                                      });
+                                      if (ok) remover.mutate(p.id);
+                                    }}
+                                    className="grid size-11 place-items-center rounded-lg text-danger hover:bg-danger-soft"
+                                  >
+                                    <Trash2 className="size-5" />
+                                  </button>
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
 
-            <CartaoRecibo />
-
-            <CartaoAssinatura />
-
-            <CartaoSeguranca />
-
-            {/* Fila de preparo: experimental, entra só quando a loja quiser. */}
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
-                <ChefHat className="size-4" />
-                Fila de preparo (experimental)
-              </span>
-              <label className="mt-3 flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={config.preparoAtivo}
-                  onChange={(e) => setConfig({ preparoAtivo: e.target.checked })}
-                  className="mt-1 size-5 shrink-0 accent-[var(--color-primary)]"
-                />
-                <span className="text-sm">
-                  <span className="block font-bold">Tela do ajudante com os pedidos em ordem</span>
-                  <span className="block text-muted-foreground">
-                    O que for anotado no balcão aparece na bancada com foto, quantidade e tempo de
-                    espera — o bilhete de papel deixa de existir.
-                  </span>
+              {/* Categorias do cardápio: um lugar só para criar, renomear e remover. */}
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                  <Tags className="size-4" />
+                  Categorias do cardápio
                 </span>
-              </label>
-              {config.preparoAtivo ? <CartaoBancada /> : null}
-            </section>
-
-
-            <CartaoInstalar />
-
-            {/* Categorias do cardápio: um lugar só para criar, renomear e remover. */}
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
-                <Tags className="size-4" />
-                Categorias do cardápio
-              </span>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Organizam as abas da tela de vendas.
-              </p>
-              <ul className="mt-3 space-y-2">
-                {categoriasCardapio.length === 0 ? (
-                  <li className="text-xs text-muted-foreground">
-                    Nenhuma categoria — os produtos ficam em “Sem categoria”.
-                  </li>
-                ) : null}
-                {categoriasCardapio.map((c) => {
-                  const usados = lista.filter((p) => (p.category?.trim() || "") === c).length;
-                  return (
-                    <li
-                      key={c}
-                      className="flex items-center gap-2 rounded-xl border border-border bg-secondary/30 py-2 pl-3 pr-2"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-sm font-bold">{c}</span>
-                      <span className="shrink-0 text-[0.6875rem] font-bold tabular-nums text-muted-foreground/70">
-                        {usados}
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`Renomear categoria ${c}`}
-                        onClick={() => setRenomeando({ de: c, para: c })}
-                        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Organizam as abas da tela de vendas.
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {categoriasCardapio.length === 0 ? (
+                    <li className="text-xs text-muted-foreground">
+                      Nenhuma categoria — os produtos ficam em “Sem categoria”.
+                    </li>
+                  ) : null}
+                  {categoriasCardapio.map((c) => {
+                    const usados = lista.filter((p) => (p.category?.trim() || "") === c).length;
+                    return (
+                      <li
+                        key={c}
+                        className="flex items-center gap-2 rounded-xl border border-border bg-secondary/30 py-2 pl-3 pr-2"
                       >
-                        <Pencil className="size-4" />
-                      </button>
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold">{c}</span>
+                        <span className="shrink-0 text-[0.6875rem] font-bold tabular-nums text-muted-foreground/70">
+                          {usados}
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Renomear categoria ${c}`}
+                          onClick={() => setRenomeando({ de: c, para: c })}
+                          className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-primary-soft hover:text-primary"
+                        >
+                          <Pencil className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remover categoria ${c}`}
+                          onClick={async () => {
+                            const ok = await confirmar({
+                              titulo: `Remover a categoria "${c}"?`,
+                              descricao: usados
+                                ? `${usados} produto(s) ficarão sem categoria.`
+                                : "Ela some das abas da tela de vendas.",
+                              confirmar: "Remover",
+                            });
+                            if (!ok) return;
+                            setConfig({
+                              categoriasProduto: config.categoriasProduto.filter((x) => x !== c),
+                            });
+                            if (usados) renomear.mutate({ de: c, para: "" });
+                          }}
+                          className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button
+                  type="button"
+                  onClick={() => setCriandoCategoria("")}
+                  className="press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
+                >
+                  <Plus className="size-4" />
+                  Nova categoria
+                </button>
+              </section>
+            </div>
+          ) : null}
+
+          {aba === "loja" ? (
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Dados e logo da loja: um cartão-resumo que abre o formulário. */}
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                  <Store className="size-4" />
+                  Dados da loja
+                </span>
+                <p className="mt-2 truncate font-display text-xl tracking-wide">
+                  {config.nomeLoja || "Sem nome"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {[config.telefone, config.endereco].filter(Boolean).join(" · ") ||
+                    "Telefone e endereço em branco"}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setEditandoLoja(true)}
+                  className="press mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
+                >
+                  <ImagePlus className="size-4" />
+                  Editar dados e logo
+                </button>
+              </section>
+
+              {/* Categorias de saída: cada loja gasta com o que gasta. */}
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                  <Tags className="size-4" />
+                  Categorias de saída
+                </span>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {config.categoriasSaida.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Nenhuma categoria — as saídas serão lançadas soltas.
+                    </p>
+                  ) : null}
+                  {config.categoriasSaida.map((c) => (
+                    <span
+                      key={c}
+                      className="flex items-center gap-1.5 rounded-xl border border-border bg-secondary/40 py-2 pl-3 pr-2 text-sm font-bold"
+                    >
+                      {c}
                       <button
                         type="button"
                         aria-label={`Remover categoria ${c}`}
                         onClick={async () => {
                           const ok = await confirmar({
                             titulo: `Remover a categoria "${c}"?`,
-                            descricao: usados
-                              ? `${usados} produto(s) ficarão sem categoria.`
-                              : "Ela some das abas da tela de vendas.",
+                            descricao:
+                              "Ela deixa de aparecer ao lançar saídas. Lançamentos antigos continuam com o nome dela.",
                             confirmar: "Remover",
                           });
                           if (!ok) return;
                           setConfig({
-                            categoriasProduto: config.categoriasProduto.filter((x) => x !== c),
+                            categoriasSaida: config.categoriasSaida.filter((x) => x !== c),
                           });
-                          if (usados) renomear.mutate({ de: c, para: "" });
                         }}
-                        className="grid size-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                        className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
                       >
-                        <Trash2 className="size-4" />
+                        <X className="size-3.5" />
                       </button>
-                    </li>
-                  );
-                })}
-              </ul>
-              <button
-                type="button"
-                onClick={() => setCriandoCategoria("")}
-                className="press mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl border-2 border-border font-bold hover:border-primary"
-              >
-                <Plus className="size-4" />
-                Nova categoria
-              </button>
-            </section>
-
-            {/* Categorias de saída: cada loja gasta com o que gasta. */}
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
-                <Tags className="size-4" />
-                Categorias de saída
-              </span>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {config.categoriasSaida.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Nenhuma categoria — as saídas serão lançadas soltas.
-                  </p>
-                ) : null}
-                {config.categoriasSaida.map((c) => (
-                  <span
-                    key={c}
-                    className="flex items-center gap-1.5 rounded-xl border border-border bg-secondary/40 py-2 pl-3 pr-2 text-sm font-bold"
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={novaCategoria}
+                    onChange={(e) => setNovaCategoria(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && adicionarCategoria()}
+                    placeholder="Nova categoria"
+                    aria-label="Nova categoria de saída"
+                    className="h-12 min-w-0 flex-1 rounded-xl border-2 border-border bg-secondary/30 px-3 text-sm outline-none focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={adicionarCategoria}
+                    className="press grid size-12 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"
+                    aria-label="Adicionar categoria"
                   >
-                    {c}
-                    <button
-                      type="button"
-                      aria-label={`Remover categoria ${c}`}
-                      onClick={async () => {
-                        const ok = await confirmar({
-                          titulo: `Remover a categoria "${c}"?`,
-                          descricao:
-                            "Ela deixa de aparecer ao lançar saídas. Lançamentos antigos continuam com o nome dela.",
-                          confirmar: "Remover",
-                        });
-                        if (!ok) return;
-                        setConfig({
-                          categoriasSaida: config.categoriasSaida.filter((x) => x !== c),
-                        });
-                      }}
+                    <Plus className="size-5" />
+                  </button>
+                </div>
+              </section>
 
-                      className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                    >
-                      <X className="size-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={novaCategoria}
-                  onChange={(e) => setNovaCategoria(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && adicionarCategoria()}
-                  placeholder="Nova categoria"
-                  aria-label="Nova categoria de saída"
-                  className="h-12 min-w-0 flex-1 rounded-xl border-2 border-border bg-secondary/30 px-3 text-sm outline-none focus:border-primary"
-                />
-                <button
-                  type="button"
-                  onClick={adicionarCategoria}
-                  className="press grid size-12 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"
-                  aria-label="Adicionar categoria"
-                >
-                  <Plus className="size-5" />
-                </button>
-              </div>
-            </section>
-
-            {/* Cronômetro: pode simplesmente não fazer sentido para a loja. */}
-            <section className="rounded-2xl border border-border bg-card p-5">
-              <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
-                <Clock className="size-4" />
-                Cronômetro das comandas
-              </span>
-              <label className="mt-3 flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={config.cronometroAtivo}
-                  onChange={(e) => setConfig({ cronometroAtivo: e.target.checked })}
-                  className="mt-1 size-5 shrink-0 accent-[var(--color-primary)]"
-                />
-                <span className="text-sm">
-                  <span className="block font-bold">Marcar o tempo de cada conta aberta</span>
-                  <span className="block text-muted-foreground">
-                    Desligado, as contas não ficam âmbar nem vermelhas e o relógio desaparece.
-                  </span>
+              {/* Cronômetro: pode simplesmente não fazer sentido para a loja. */}
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                  <Clock className="size-4" />
+                  Cronômetro das comandas
                 </span>
-              </label>
-              {config.cronometroAtivo ? (
-                <button
-                  type="button"
-                  onClick={() => setEditandoTempos(true)}
-                  className="press mt-4 h-12 w-full rounded-xl border-2 border-border font-bold hover:border-primary"
-                >
-                  Ajustar tempos ({config.alertaMin} / {config.atrasoMin} min)
-                </button>
-              ) : null}
-            </section>
-          </div>
+                <label className="mt-3 flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={config.cronometroAtivo}
+                    onChange={(e) => setConfig({ cronometroAtivo: e.target.checked })}
+                    className="mt-1 size-5 shrink-0 accent-[var(--color-primary)]"
+                  />
+                  <span className="text-sm">
+                    <span className="block font-bold">Marcar o tempo de cada conta aberta</span>
+                    <span className="block text-muted-foreground">
+                      Desligado, as contas não ficam âmbar nem vermelhas e o relógio desaparece.
+                    </span>
+                  </span>
+                </label>
+                {config.cronometroAtivo ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditandoTempos(true)}
+                    className="press mt-4 h-12 w-full rounded-xl border-2 border-border font-bold hover:border-primary"
+                  >
+                    Ajustar tempos ({config.alertaMin} / {config.atrasoMin} min)
+                  </button>
+                ) : null}
+              </section>
+
+              {/* Fila de preparo: experimental, entra só quando a loja quiser. */}
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <span className="eyebrow flex items-center gap-1.5 text-muted-foreground">
+                  <ChefHat className="size-4" />
+                  Fila de preparo (experimental)
+                </span>
+                <label className="mt-3 flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={config.preparoAtivo}
+                    onChange={(e) => setConfig({ preparoAtivo: e.target.checked })}
+                    className="mt-1 size-5 shrink-0 accent-[var(--color-primary)]"
+                  />
+                  <span className="text-sm">
+                    <span className="block font-bold">
+                      Tela do ajudante com os pedidos em ordem
+                    </span>
+                    <span className="block text-muted-foreground">
+                      O que for anotado no balcão aparece na bancada com foto, quantidade e tempo
+                      de espera — o bilhete de papel deixa de existir.
+                    </span>
+                  </span>
+                </label>
+                {config.preparoAtivo ? <CartaoBancada /> : null}
+              </section>
+
+              <CartaoInstalar />
+            </div>
+          ) : null}
+
+          {aba === "recibo" ? (
+            <div className="mx-auto max-w-xl">
+              <CartaoRecibo />
+            </div>
+          ) : null}
+
+          {aba === "seguranca" ? (
+            <div className="mx-auto max-w-xl">
+              <CartaoSeguranca />
+            </div>
+          ) : null}
         </div>
       </div>
+
 
       {rascunho ? (
         <Modal
@@ -1029,7 +1087,7 @@ function AdminPage() {
       {editandoLoja ? (
         <Modal
           titulo="Dados da loja"
-          subtitulo="Nome, contato, logo e a mensagem impressa no recibo."
+          subtitulo="Nome, contato e logo — o que aparece no topo do recibo."
           onFechar={() => setEditandoLoja(false)}
           rodape={
             <button
@@ -1073,15 +1131,6 @@ function AdminPage() {
               value={dadosLoja.address}
               onChange={(e) => setDadosLoja({ ...dadosLoja, address: texto(e.target.value, 140) })}
               className={campo}
-            />
-          </label>
-          <label className="mt-3 block text-sm font-bold">
-            Mensagem do recibo
-            <textarea
-              value={dadosLoja.receipt_footer}
-              onChange={(e) => setDadosLoja({ ...dadosLoja, receipt_footer: e.target.value })}
-              rows={2}
-              className="mt-1.5 w-full resize-none rounded-xl border-2 border-border bg-secondary/30 p-3 text-sm font-normal outline-none transition-colors focus:border-primary focus:bg-card"
             />
           </label>
         </Modal>

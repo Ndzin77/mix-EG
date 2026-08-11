@@ -1,17 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import {
-  ArrowRight,
-  BarChart3,
-  Check,
-  ChefHat,
-  Clock,
-  Receipt,
-  ShieldCheck,
-  Sparkles,
-  Wallet,
-} from "lucide-react";
+import { ArrowRight, Check, Clock, Sparkles, Wallet, BarChart3 } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "@/components/modal";
 import { CampoSenha } from "@/components/campo-senha";
@@ -23,17 +13,17 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Doce PDV — sistema para sorveteria e confeitaria por R$ 39,90" },
+      { title: "Gestor Pro — sistema de balcão e caixa por R$ 39,90/mês" },
       {
         name: "description",
         content:
-          "Venda no balcão, controle comandas, saídas, fila de preparo e relatórios. Plano promocional de R$ 39,90 por mês, sem fidelidade.",
+          "Venda rápida no balcão, caixa fechando certo e funciona sem internet. Para lanchonete, sorveteria, açaí, padaria e food truck. R$ 39,90 por mês, sem fidelidade.",
       },
-      { property: "og:title", content: "Doce PDV — gestão completa por R$ 39,90/mês" },
+      { property: "og:title", content: "Gestor Pro — venda no balcão e caixa certo, R$ 39,90/mês" },
       {
         property: "og:description",
         content:
-          "PDV, comandas, caixa, recibo em bobina e relatórios num sistema só. Comece hoje por R$ 39,90 por mês.",
+          "Venda em 3 toques, caixa fechado no fim do dia e funciona offline. Sem fidelidade.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -42,22 +32,32 @@ export const Route = createFileRoute("/")({
   component: LandingPage,
 });
 
+/* Três benefícios, não seis: quanto menos opção, mais decisão. */
 const beneficios = [
-  { icone: Wallet, titulo: "Venda em 3 toques", texto: "Comanda aberta, cobrança dividida e troco calculado na hora." },
-  { icone: ChefHat, titulo: "Bancada compartilhada", texto: "A cozinha vê a fila por um link, sem login e sem confusão." },
-  { icone: Receipt, titulo: "Recibo do seu jeito", texto: "Bobina 58/80mm ou A4, com sua logo e o que você quiser mostrar." },
-  { icone: BarChart3, titulo: "Relatório que decide", texto: "Entrou, saiu, sobrou. Campeões de venda e fechamento por dia." },
-  { icone: Clock, titulo: "Funciona offline", texto: "Caiu a internet? A venda continua e sobe sozinha depois." },
-  { icone: ShieldCheck, titulo: "Cadeado por tela", texto: "Caixa e relatórios só abrem com a senha que você definir." },
+  {
+    icone: Wallet,
+    titulo: "Venda em 3 toques",
+    texto: "Comanda aberta, cobrança dividida e troco na hora.",
+  },
+  {
+    icone: BarChart3,
+    titulo: "Caixa fechando certo",
+    texto: "Entrou, saiu, sobrou — sem planilha no fim do dia.",
+  },
+  {
+    icone: Clock,
+    titulo: "Funciona sem internet",
+    texto: "Caiu a rede? A venda continua e sobe sozinha depois.",
+  },
 ];
 
 function LandingPage() {
   const [aberto, setAberto] = useState(false);
 
   return (
-    <main className="min-h-screen bg-background">
-      <header className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
-        <span className="font-display text-xl tracking-wide">Doce PDV</span>
+    <main className="min-h-screen bg-background pb-24 sm:pb-0">
+      <header className="mx-auto flex max-w-4xl items-center justify-between px-5 py-5">
+        <span className="font-display text-xl tracking-wide">GESTOR PRO</span>
         <Link
           to="/auth"
           className="press rounded-xl border-2 border-border px-4 py-2 text-sm font-bold hover:border-primary"
@@ -66,24 +66,22 @@ function LandingPage() {
         </Link>
       </header>
 
-      <section className="mx-auto max-w-5xl px-5 pb-10 pt-6 text-center">
+      <section className="mx-auto max-w-3xl px-5 pb-10 pt-4 text-center">
         <span className="eyebrow inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-primary">
           <Sparkles className="size-4" />
           Promoção de lançamento
         </span>
         <h1 className="mt-4 font-display text-4xl leading-tight tracking-wide sm:text-6xl">
-          O caixa da sua sorveteria fechando certo todo dia
+          Seu balcão vendendo rápido e o caixa fechando certo
         </h1>
-        <p className="mx-auto mt-4 max-w-2xl text-base text-muted-foreground sm:text-lg">
-          Vendas, comandas, saídas, fila de preparo, recibo e relatórios num sistema só — feito
-          para o balcão cheio, no celular ou no computador.
+        <p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
+          Para lanchonete, sorveteria, açaí, padaria, food truck e qualquer negócio que vende no
+          balcão — no celular ou no computador.
         </p>
 
-        <div className="mx-auto mt-8 w-full max-w-md rounded-3xl border-2 border-primary/30 bg-card p-6 shadow-xl">
+        <div className="mx-auto mt-8 w-full max-w-sm rounded-3xl border-2 border-primary/30 bg-card p-6 shadow-xl">
           <p className="eyebrow text-muted-foreground">Plano mensal</p>
-          <p className="mt-1 flex items-end justify-center gap-1">
-            <span className="text-sm font-bold text-muted-foreground line-through">R$ 89,90</span>
-          </p>
+          <p className="mt-1 text-sm font-bold text-muted-foreground line-through">R$ 89,90</p>
           <p className="money font-display text-6xl tracking-wide">
             R$ 39<span className="text-3xl">,90</span>
           </p>
@@ -102,7 +100,7 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-5xl gap-3 px-5 pb-16 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="mx-auto grid max-w-4xl gap-3 px-5 pb-16 sm:grid-cols-3">
         {beneficios.map((b) => (
           <article key={b.titulo} className="rounded-2xl border border-border bg-card p-5">
             <b.icone className="size-6 text-primary" />
@@ -111,6 +109,19 @@ function LandingPage() {
           </article>
         ))}
       </section>
+
+      {/* Zona do polegar: no celular o botão fica sempre à mão. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 p-3 backdrop-blur sm:hidden">
+        <button
+          type="button"
+          onClick={() => setAberto(true)}
+          className="press glow-primary flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-primary font-display text-xl tracking-wider text-primary-foreground"
+        >
+          Começar por R$ 39,90
+          <ArrowRight className="size-5" />
+        </button>
+      </div>
+
 
       {aberto ? <ModalCadastro onFechar={() => setAberto(false)} /> : null}
     </main>

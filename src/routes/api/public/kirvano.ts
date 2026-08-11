@@ -83,6 +83,20 @@ export const Route = createFileRoute("/api/public/kirvano")({
               : null;
         if (!status) return Response.json({ ok: true, ignorado: evento });
 
+        /* Reenvio da Kirvano não pode "desligar" quem já está pago em dia:
+           só marcamos atraso quando o período realmente venceu. */
+        if (status === "past_due") {
+          const { data: atual } = await supabaseAdmin
+            .from("subscriptions")
+            .select("current_period_end")
+            .eq("tenant_id", tenant)
+            .maybeSingle();
+          const fim = atual?.current_period_end as string | undefined;
+          if (fim && new Date(fim).getTime() > Date.now()) {
+            return Response.json({ ok: true, ignorado: "ainda dentro do período pago" });
+          }
+        }
+
         const patch: Record<string, unknown> = {
           tenant_id: tenant,
           status,

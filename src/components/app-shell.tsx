@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import {
+  BadgeCheck,
   BarChart3,
   ChefHat,
   Lock,
@@ -10,13 +11,15 @@ import {
   ShoppingCart,
   Wallet,
 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import logoAsset from "@/assets/eg-mix-logo.png.asset.json";
 import { useSincronizarOffline } from "@/lib/offline";
 import { useImagem } from "@/lib/imagens";
 import { cn } from "@/lib/utils";
 import { useConfig } from "@/lib/config";
+import { minhaAssinatura } from "@/lib/assinatura.functions";
 import type { Secao } from "@/lib/travas";
 
 const nav = [
@@ -26,6 +29,7 @@ const nav = [
   { to: "/caixa", label: "Caixa", icon: Wallet, secao: "caixa" },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3, secao: "relatorios" },
   { to: "/admin", label: "Admin", icon: Settings, secao: "admin" },
+  { to: "/assinatura", label: "Assinatura", icon: BadgeCheck, secao: "assinatura" },
 ] as const satisfies readonly {
   to: string;
   label: string;
@@ -49,6 +53,17 @@ export function AppShell({ aside, children }: { aside?: ReactNode; children: Rea
   const logo = useImagem(config.logoUrl) ?? logoAsset.url;
   /* Fila offline ligada em toda tela logada: sobe o que ficou esperando. */
   useSincronizarOffline();
+  /* Mesma chave do aviso de assinatura: uma consulta serve as duas coisas. */
+  const lerAssinatura = useServerFn(minhaAssinatura);
+  const assinatura = useQuery({
+    queryKey: ["assinatura"],
+    queryFn: () => lerAssinatura(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  /* Ponto vermelho só quando existe algo a resolver — alerta que não mente. */
+  const alerta = (secao: Secao | null) =>
+    secao === "assinatura" && Boolean(assinatura.data && !assinatura.data.emDia);
 
   async function sair() {
     await queryClient.cancelQueries();
@@ -86,6 +101,9 @@ export function AppShell({ aside, children }: { aside?: ReactNode; children: Rea
                 <item.icon className="size-6 shrink-0" />
                 {trancada(item.secao) ? (
                   <Lock className="absolute -right-2 -top-1 size-3.5 rounded-full bg-warning p-0.5 text-warning-foreground" />
+                ) : null}
+                {alerta(item.secao) ? (
+                  <span className="absolute -right-1.5 -top-1 size-2.5 animate-pulse rounded-full bg-danger ring-2 ring-sidebar" />
                 ) : null}
               </span>
               <span className="text-[9px] font-bold uppercase tracking-wider">{item.label}</span>
@@ -149,6 +167,9 @@ export function AppShell({ aside, children }: { aside?: ReactNode; children: Rea
               <item.icon className="size-5" />
               {trancada(item.secao) ? (
                 <Lock className="absolute -right-2 -top-1 size-3 rounded-full bg-warning p-0.5 text-warning-foreground" />
+              ) : null}
+              {alerta(item.secao) ? (
+                <span className="absolute -right-1.5 -top-1 size-2 animate-pulse rounded-full bg-danger ring-2 ring-sidebar" />
               ) : null}
             </span>
             {item.label}
