@@ -181,7 +181,7 @@ function ModalCadastro({ onFechar }: { onFechar: () => void }) {
             onClick={() => (passo === 2 ? void concluir() : setPasso((p) => p + 1))}
             className="press h-14 flex-1 rounded-xl bg-primary font-display text-xl tracking-wide text-primary-foreground disabled:opacity-40"
           >
-            {passo === 2 ? (enviando ? "Criando…" : "Criar e pagar R$ 39,90") : "Continuar"}
+            {passo === 2 ? (enviando ? "Criando…" : "Criar conta e continuar") : "Continuar"}
           </button>
         </>
       }
