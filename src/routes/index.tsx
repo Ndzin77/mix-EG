@@ -19,7 +19,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Venda rápida no balcão, caixa fechando certo e funciona sem internet. Para lanchonete, sorveteria, açaí, padaria e food truck. R$ 39,90 por mês, sem fidelidade.",
+          "Venda rápida no balcão, caixa fechando certo e funciona sem internet. Para lanchonete, sorveteria, açaí e padaria. R$ 39,90 por mês, sem fidelidade.",
       },
       { property: "og:title", content: "Gestor Pro — venda no balcão e caixa certo, R$ 39,90/mês" },
       {
