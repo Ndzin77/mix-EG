@@ -61,15 +61,6 @@ export const criarConta = createServerFn({ method: "POST" })
           .from("store_settings")
           .update({ store_name: data.loja, phone: data.telefone })
           .eq("tenant_id", tenant);
-        await cliente.from("subscriptions").upsert(
-          {
-            tenant_id: tenant,
-            status: "trialing",
-            buyer_email: email,
-            current_period_end: new Date(Date.now() + 7 * 86_400_000).toISOString(),
-          } as never,
-          { onConflict: "tenant_id" },
-        );
       }
     }
 

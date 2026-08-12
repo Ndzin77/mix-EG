@@ -45,7 +45,7 @@ export function AvisoAssinatura() {
   }, [hoje]);
 
   const a = assinatura.data;
-  if (!a || a.emDia) return null;
+  if (!a || !a.pago || a.emDia) return null;
 
   const url = checkout.data?.url ?? "";
   const insistente = a.atraso >= 5;

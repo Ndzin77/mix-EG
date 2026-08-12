@@ -1,10 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth, tenantDoUsuario } from "@/lib/auth-middleware";
 import {
-  CARENCIA_DIAS,
   calcular,
   dadosDaCompra,
-  diasDoPlano,
   linkPagamento,
   PLANO_URL,
   PRECO_MENSAL,
@@ -26,13 +24,13 @@ export const minhaAssinatura = createServerFn({ method: "GET" })
       .eq("tenant_id", tenant)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    /* Sem linha ainda: trata como cortesia de 7 dias a partir de agora. */
+    /* Sem pagamento confirmado: estado pendente, nunca uma cortesia inventada. */
     if (!data) {
       return calcular(
-        "trialing",
+        "pending",
         "mensal",
         PRECO_MENSAL,
-        new Date(Date.now() + CARENCIA_DIAS * 86_400_000).toISOString(),
+        new Date(0).toISOString(),
       );
     }
     return calcular(
@@ -66,7 +64,7 @@ export const linkCheckout = createServerFn({ method: "GET" })
  * Conserto de rota: quem pagou antes de confirmar o e-mail (ou antes da conta
  * existir) tinha o aviso da Kirvano descartado. Agora o evento fica guardado
  * e é aplicado no primeiro acesso — o pagamento nunca se perde. Também
- * termina o cadastro vindo da landing (nome da loja, telefone e cortesia).
+ * termina o cadastro vindo da landing (nome da loja e telefone).
  */
 export const sincronizarConta = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -99,27 +97,7 @@ export const sincronizarConta = createServerFn({ method: "POST" })
       }
     }
 
-    /* 2) Cortesia de 7 dias quando a loja nem tem linha de assinatura. */
-    const { data: atual } = await db
-      .from("subscriptions")
-      .select("status, current_period_end")
-      .eq("tenant_id", tenant)
-      .maybeSingle();
-    if (!atual) {
-      await db.from("subscriptions").upsert(
-        {
-          tenant_id: tenant,
-          status: "trialing",
-          plan: "mensal",
-          price: PRECO_MENSAL,
-          buyer_email: email || null,
-          current_period_end: new Date(Date.now() + CARENCIA_DIAS * 86_400_000).toISOString(),
-        },
-        { onConflict: "tenant_id" },
-      );
-    }
-
-    /* 3) Pagamentos guardados: aplica o mais recente e marca como usado. */
+    /* 2) Pagamentos guardados: aplica o mais recente e marca como usado. */
     let aplicado: string | null = null;
     if (email) {
       const { data: eventos } = await db
@@ -142,21 +120,18 @@ export const sincronizarConta = createServerFn({ method: "POST" })
         ),
       );
       if (pago) {
-        /* O plano é o que a pessoa comprou (mensal, semestral, anual…). */
         const compra = dadosDaCompra(pago.payload);
-        const dias = diasDoPlano(compra.plano);
         await db.from("subscriptions").upsert(
           {
             tenant_id: tenant,
             status: "active",
-            plan: compra.plano,
-            price: compra.valor ?? PRECO_MENSAL,
+            plan: "mensal",
+            price: PRECO_MENSAL,
             buyer_email: email,
             last_event: pago.event,
             current_period_end:
               (pago.next_charge_date ? new Date(pago.next_charge_date).toISOString() : null) ??
-              compra.proxima ??
-              new Date(Date.now() + (dias + 1) * 86_400_000).toISOString(),
+              compra.proxima ?? new Date(Date.now() + 30 * 86_400_000).toISOString(),
             updated_at: new Date().toISOString(),
           },
           { onConflict: "tenant_id" },

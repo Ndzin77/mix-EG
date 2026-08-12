@@ -25,6 +25,7 @@ import {
 } from "@/lib/assinatura";
 import { brl, useConfig } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/_authenticated/assinatura")({
   head: () => ({
@@ -107,15 +108,16 @@ function Conteudo() {
       <div className="animate-fade-in mx-auto grid max-w-3xl gap-4">
         <Anel estado={a} carregando={assinatura.isLoading} loja={config.nomeLoja} />
         <Plano estado={a} url={checkout.data?.url ?? ""} />
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => void conferir()}
           disabled={conferindo}
-          className="press mx-auto flex h-12 items-center gap-2 rounded-xl border-2 border-border px-5 text-sm font-bold text-muted-foreground hover:border-primary hover:text-foreground disabled:opacity-50"
+          className="press mx-auto h-12 rounded-xl px-5 text-sm font-bold"
         >
           <RefreshCw className={cn("size-4", conferindo && "animate-spin")} />
           {conferindo ? "Conferindo…" : "Já paguei — conferir agora"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -166,7 +168,7 @@ function Anel({
     : "—";
 
   return (
-    <section className={cn("rounded-3xl border-2 p-6 text-center", fundo)}>
+    <section className={cn("rounded-2xl border-2 p-6 text-center", fundo)}>
       <span className="eyebrow text-muted-foreground">{loja || "Sua loja"}</span>
 
       <div className="relative mx-auto mt-4 grid size-48 place-items-center">
@@ -277,7 +279,7 @@ function Plano({ estado, url }: { estado: EstadoAssinatura | undefined; url: str
   const emDia = estado?.emDia ?? false;
 
   return (
-    <section className="rounded-3xl border border-border bg-card p-5 md:p-6">
+    <section className="rounded-2xl border border-border bg-card p-5 md:p-6">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-4">
         <div className="min-w-0">
           <span className="eyebrow text-muted-foreground">

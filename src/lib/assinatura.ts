@@ -8,7 +8,7 @@
 /** Tolerância da casa: sete dias depois do vencimento o acesso fecha. */
 export const CARENCIA_DIAS = 7;
 
-/** Preço promocional de lançamento. */
+/** Único plano vendido nesta fase. A Kirvano confirma cada renovação mensal. */
 export const PRECO_MENSAL = 39.9;
 
 /** Página de pagamento do plano (Kirvano). */
@@ -26,33 +26,13 @@ export const WEBHOOK_URL =
  * e a duração do ciclo passa a valer para a data e para o anel da tela.
  * Vender uma oferta nova (anual, semestral…) não pede mexer no código.
  */
-export const PLANOS = {
-  semanal: { rotulo: "semanal", dias: 7, sufixo: "/semana" },
-  quinzenal: { rotulo: "quinzenal", dias: 15, sufixo: "/quinzena" },
-  mensal: { rotulo: "mensal", dias: 30, sufixo: "/mês" },
-  bimestral: { rotulo: "bimestral", dias: 60, sufixo: "/2 meses" },
-  trimestral: { rotulo: "trimestral", dias: 90, sufixo: "/trimestre" },
-  semestral: { rotulo: "semestral", dias: 180, sufixo: "/semestre" },
-  anual: { rotulo: "anual", dias: 365, sufixo: "/ano" },
-  vitalicio: { rotulo: "vitalício", dias: 3650, sufixo: " uma vez" },
-} as const;
+export const PLANOS = { mensal: { rotulo: "mensal", dias: 30, sufixo: "/mês" } } as const;
 
 export type Plano = keyof typeof PLANOS;
 
 /** Traduz o texto que vem da Kirvano para um plano conhecido. */
 export function normalizarPlano(texto: string | null | undefined): Plano {
-  const t = (texto ?? "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  if (!t) return "mensal";
-  if (/vitalic|lifetime|unic|one[- ]?time/.test(t)) return "vitalicio";
-  if (/anual|annual|yearly|ano|12\s*(meses|m)|year/.test(t)) return "anual";
-  if (/semestr|6\s*(meses|m)|half/.test(t)) return "semestral";
-  if (/trimestr|quarter|3\s*(meses|m)/.test(t)) return "trimestral";
-  if (/bimestr|2\s*(meses|m)/.test(t)) return "bimestral";
-  if (/quinzen|15\s*dias|biweek|fortnight/.test(t)) return "quinzenal";
-  if (/semanal|weekly|week|7\s*dias/.test(t)) return "semanal";
+  void texto;
   return "mensal";
 }
 
@@ -84,6 +64,8 @@ export type EstadoAssinatura = {
   restam: number;
   bloqueado: boolean;
   emDia: boolean;
+  /** só é verdadeiro depois de uma confirmação de pagamento da Kirvano */
+  pago: boolean;
   /** e-mail que comprou na Kirvano (quando já houve compra) */
   email: string | null;
   /** último evento recebido da Kirvano */
@@ -103,11 +85,13 @@ export function calcular(
     Pick<EstadoAssinatura, "email" | "ultimoEvento" | "confirmadoEm" | "primeiroPagoEm">
   > = {},
 ): EstadoAssinatura {
+  const evento = (extra.ultimoEvento ?? "").toUpperCase();
+  const pago = ["SALE_APPROVED", "SUBSCRIPTION_APPROVED", "SUBSCRIPTION_RENEWED"].includes(evento);
   const dia = 86_400_000;
   const diff = Date.now() - new Date(venceEm).getTime();
   const atraso = Math.max(0, Math.floor(diff / dia));
   const cancelada = status === "canceled";
-  const bloqueado = cancelada || atraso >= CARENCIA_DIAS;
+  const bloqueado = !pago || cancelada || atraso >= CARENCIA_DIAS;
   return {
     status,
     plano,
@@ -117,7 +101,8 @@ export function calcular(
     atraso,
     restam: Math.max(0, CARENCIA_DIAS - atraso),
     bloqueado,
-    emDia: !cancelada && atraso === 0,
+    emDia: pago && !cancelada && atraso === 0,
+    pago,
     email: extra.email ?? null,
     ultimoEvento: extra.ultimoEvento ?? null,
     confirmadoEm: extra.confirmadoEm ?? null,
@@ -156,19 +141,6 @@ export function dadosDaCompra(payload: unknown): {
 } {
   const c = (payload ?? {}) as Record<string, any>;
   const produto = Array.isArray(c["products"]) ? c["products"][0] : null;
-  const texto = [
-    c["plan"]?.name,
-    c["plan"]?.charge_frequency,
-    c["plan"]?.frequency,
-    c["subscription"]?.plan?.name,
-    c["subscription"]?.charge_frequency,
-    c["offer"]?.name,
-    produto?.offer_name,
-    produto?.name,
-    c["product_name"],
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   const bruto =
     c["total_price"] ?? c["payment"]?.total_price ?? produto?.price ?? c["price"] ?? null;
@@ -183,7 +155,7 @@ export function dadosDaCompra(payload: unknown): {
     c["subscription"]?.next_charge_date ?? c["next_charge_date"] ?? c["subscription"]?.charge_date;
   const proxima = data ? new Date(data as string).toISOString() : null;
 
-  return { plano: normalizarPlano(texto), valor, proxima };
+  return { plano: "mensal", valor, proxima };
 }
 
 /** Nome amigável dos eventos que a Kirvano manda. */

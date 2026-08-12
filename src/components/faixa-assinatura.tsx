@@ -30,7 +30,7 @@ export function FaixaAssinatura() {
   });
 
   const a = assinatura.data;
-  if (!a || a.bloqueado) return null;
+  if (!a || !a.pago || a.bloqueado) return null;
 
   const faltam = diasAteVencer(a.venceEm);
   const atrasada = !a.emDia;

@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/auth")({
   /* Tela de login é puro navegador (sessão vive no aparelho): sem SSR não há
@@ -35,6 +36,7 @@ function AuthPage() {
   /* Erro de confirmação vira caminho, não parede. */
   const [naoConfirmado, setNaoConfirmado] = useState(false);
   const [reenviando, setReenviando] = useState(false);
+  const [esperaReenvio, setEsperaReenvio] = useState(0);
   /* Só libera o botão quando o React já está no comando do formulário. */
   const [pronto, setPronto] = useState(false);
 
@@ -44,6 +46,12 @@ function AuthPage() {
       if (data.session) navigate({ to: "/vendas", replace: true });
     });
   }, [navigate]);
+
+  useEffect(() => {
+    if (esperaReenvio <= 0) return;
+    const timer = window.setInterval(() => setEsperaReenvio((segundos) => Math.max(0, segundos - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [esperaReenvio]);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
@@ -60,9 +68,7 @@ function AuthPage() {
           setNaoConfirmado(true);
           throw new Error("Seu e-mail ainda não foi confirmado.");
         }
-        throw new Error(
-          /invalid login/i.test(error.message) ? "E-mail ou senha incorretos." : error.message,
-        );
+        throw new Error(/invalid login/i.test(error.message) ? "E-mail ou senha incorretos." : traduzirErroAuth(error.message));
       }
       navigate({ to: "/vendas", replace: true });
     } catch (erro) {
@@ -73,11 +79,12 @@ function AuthPage() {
   }
 
   async function reenviar() {
-    if (reenviando) return;
+    if (reenviando || esperaReenvio > 0) return;
     setReenviando(true);
     try {
       const { error } = await supabase.auth.resend({ type: "signup", email: email.trim() });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(traduzirErroAuth(error.message));
+      setEsperaReenvio(60);
       toast.success("Link enviado. Confira a caixa de entrada e o spam.");
     } catch (erro) {
       toast.error(erro instanceof Error ? erro.message : "Não consegui reenviar agora.");
@@ -131,17 +138,20 @@ function AuthPage() {
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               autoComplete="current-password"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="mt-1.5 h-14 w-full rounded-xl border-2 border-border bg-secondary/30 px-4 text-base font-normal outline-none transition-colors focus:border-primary focus:bg-card"
             />
           </label>
 
-          <button
+          <Button
             type="submit"
             disabled={carregando || !pronto}
-            className="touch-target mt-6 w-full rounded-xl bg-primary px-4 text-lg font-bold text-primary-foreground shadow-lg transition-opacity disabled:opacity-60"
+            className="touch-target mt-6 h-14 w-full rounded-xl text-lg font-bold shadow-lg"
           >
             {!pronto ? "Carregando..." : carregando ? "Aguarde..." : "Entrar"}
-          </button>
+          </Button>
 
           {naoConfirmado ? (
             <div className="modal-in mt-5 rounded-2xl border-2 border-warning/50 bg-warning/10 p-4 text-left">
@@ -150,14 +160,18 @@ function AuthPage() {
                 O pagamento não se perde: assim que você confirmar, o acesso libera com o plano já
                 aplicado.
               </p>
-              <button
+              <Button
                 type="button"
                 onClick={() => void reenviar()}
-                disabled={reenviando}
-                className="press mt-3 h-12 w-full rounded-xl bg-warning font-bold text-warning-foreground disabled:opacity-60"
+                disabled={reenviando || esperaReenvio > 0}
+                className="press mt-3 h-12 w-full rounded-xl bg-warning font-bold text-warning-foreground hover:bg-warning/90"
               >
-                {reenviando ? "Enviando…" : `Reenviar confirmação para ${email.trim()}`}
-              </button>
+                {reenviando
+                  ? "Enviando…"
+                  : esperaReenvio > 0
+                    ? `Tente novamente em ${esperaReenvio}s`
+                    : `Reenviar confirmação para ${email.trim()}`}
+              </Button>
             </div>
           ) : null}
 
@@ -165,4 +179,11 @@ function AuthPage() {
       </div>
     </div>
   );
+}
+
+function traduzirErroAuth(mensagem: string) {
+  if (/rate limit|too many requests/i.test(mensagem)) {
+    return "Muitos e-mails foram solicitados em pouco tempo. Aguarde alguns minutos antes de tentar novamente.";
+  }
+  return mensagem;
 }

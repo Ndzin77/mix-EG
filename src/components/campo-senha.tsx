@@ -42,6 +42,10 @@ export function CampoSenha({
           type={ver ? "text" : "password"}
           value={valor}
           autoFocus={autoFocus}
+          autoCapitalize="none"
+          autoCorrect="off"
+          autoComplete="new-password"
+          spellCheck={false}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onEnter?.()}

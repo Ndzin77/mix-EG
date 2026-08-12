@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { dadosDaCompra, diasDoPlano } from "@/lib/assinatura";
+import { z } from "zod";
+import { dadosDaCompra, PRECO_MENSAL } from "@/lib/assinatura";
 
 /**
  * Recebimento automático da Kirvano. É a única porta que grava assinatura:
@@ -11,14 +12,13 @@ import { dadosDaCompra, diasDoPlano } from "@/lib/assinatura";
  * reconhecido no primeiro acesso. Pagamento não se perde.
  */
 
-type Corpo = {
-  event?: string;
-  status?: string;
-  customer?: { email?: string; name?: string; phone?: string };
-  subscription?: { id?: string; next_charge_date?: string; charge_date?: string };
-  sale_id?: string;
-  checkout_id?: string;
-};
+const corpoSchema = z.object({
+  event: z.string().optional(),
+  status: z.string().optional(),
+  customer: z.object({ email: z.string().email(), name: z.string().optional(), phone: z.string().optional() }),
+  subscription: z.object({ id: z.string().optional(), next_charge_date: z.string().optional(), charge_date: z.string().optional() }).optional(),
+}).passthrough();
+type Corpo = z.infer<typeof corpoSchema>;
 
 const ATIVA = ["SALE_APPROVED", "SUBSCRIPTION_RENEWED", "SUBSCRIPTION_APPROVED"];
 const CANCELA = [
@@ -30,9 +30,7 @@ const CANCELA = [
 ];
 const ATRASA = ["SUBSCRIPTION_LATE", "SALE_REFUSED", "ABANDONED_CART"];
 
-/* Sem data da Kirvano, a renovação segue a duração do plano comprado. */
-const fimDoCiclo = (plano: string) =>
-  new Date(Date.now() + (diasDoPlano(plano) + 1) * 86_400_000).toISOString();
+const fimDoCiclo = () => new Date(Date.now() + 30 * 86_400_000).toISOString();
 
 export const Route = createFileRoute("/api/public/kirvano")({
   server: {
@@ -47,7 +45,7 @@ export const Route = createFileRoute("/api/public/kirvano")({
 
         let corpo: Corpo;
         try {
-          corpo = (await request.json()) as Corpo;
+          corpo = corpoSchema.parse(await request.json());
         } catch {
           return new Response("Invalid JSON", { status: 400 });
         }
@@ -138,10 +136,9 @@ export const Route = createFileRoute("/api/public/kirvano")({
         };
         if (corpo.subscription?.id) patch["kirvano_subscription_id"] = corpo.subscription.id;
         if (status === "active") {
-          /* Quem manda é o plano comprado: mensal, semestral, anual… */
-          patch["plan"] = compra.plano;
-          if (compra.valor) patch["price"] = compra.valor;
-          patch["current_period_end"] = proxima ?? fimDoCiclo(compra.plano);
+          patch["plan"] = "mensal";
+          patch["price"] = PRECO_MENSAL;
+          patch["current_period_end"] = proxima ?? fimDoCiclo();
         }
 
         const { error } = await admin

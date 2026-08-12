@@ -10,6 +10,7 @@ import { criarConta } from "@/lib/cadastro.functions";
 import { telefone as mascaraTelefone } from "@/lib/campos";
 import { senhaValida } from "@/lib/travas";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -164,7 +165,12 @@ function ModalCadastro({ onFechar }: { onFechar: () => void }) {
       if (r.checkout) window.location.href = r.checkout;
       else navigate({ to: "/auth" });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Não consegui criar a conta.");
+      const mensagem = e instanceof Error ? e.message : "Não consegui criar a conta.";
+      toast.error(
+        /rate limit|too many requests/i.test(mensagem)
+          ? "Muitos e-mails foram solicitados. Aguarde alguns minutos e tente novamente."
+          : mensagem,
+      );
       setEnviando(false);
     }
   }
@@ -311,17 +317,26 @@ function ModalConfirmar({
 }) {
   const [reenviando, setReenviando] = useState(false);
   const [enviado, setEnviado] = useState(false);
+  const [espera, setEspera] = useState(0);
 
   async function reenviar() {
-    if (reenviando) return;
+    if (reenviando || espera > 0) return;
     setReenviando(true);
     try {
       const { error } = await supabase.auth.resend({ type: "signup", email });
       if (error) throw new Error(error.message);
       setEnviado(true);
+      setEspera(60);
+      const timer = window.setInterval(() => {
+        setEspera((segundos) => {
+          if (segundos <= 1) window.clearInterval(timer);
+          return Math.max(0, segundos - 1);
+        });
+      }, 1000);
       toast.success("Enviei de novo. Confira a caixa de entrada e o spam.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Não consegui reenviar agora.");
+      const mensagem = e instanceof Error ? e.message : "Não consegui reenviar agora.";
+      toast.error(/rate limit/i.test(mensagem) ? "Limite de e-mails atingido. Aguarde alguns minutos." : mensagem);
     } finally {
       setReenviando(false);
     }
@@ -362,14 +377,15 @@ function ModalConfirmar({
           )}
         </ol>
 
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => void reenviar()}
-          disabled={reenviando}
-          className="press h-12 rounded-xl border-2 border-border text-sm font-bold disabled:opacity-50"
+          disabled={reenviando || espera > 0}
+          className="press h-12 rounded-xl text-sm font-bold"
         >
-          {reenviando ? "Enviando…" : enviado ? "Enviar novamente" : "Não recebi — reenviar e-mail"}
-        </button>
+          {reenviando ? "Enviando…" : espera > 0 ? `Tente novamente em ${espera}s` : enviado ? "Enviar novamente" : "Não recebi — reenviar e-mail"}
+        </Button>
         <Link to="/auth" className="text-center text-xs font-bold text-muted-foreground underline">
           Já confirmei, quero entrar
         </Link>
