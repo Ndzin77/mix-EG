@@ -77,7 +77,7 @@ function LandingPage() {
           Seu balcão vendendo rápido e o caixa fechando certo
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-base text-muted-foreground sm:text-lg">
-          Para lanchonete, sorveteria, açaí, padaria, food truck e qualquer negócio que vende no
+          Para lanchonete, sorveteria, açaí, padaria e qualquer negócio que vende no
           balcão — no celular ou no computador.
         </p>
 
