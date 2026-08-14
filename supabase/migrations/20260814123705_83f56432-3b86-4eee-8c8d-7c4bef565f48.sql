@@ -1,1 +1,0 @@
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS opcoes_multi boolean NOT NULL DEFAULT false;
