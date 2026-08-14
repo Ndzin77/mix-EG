@@ -1,1 +1,0 @@
-REVOKE EXECUTE ON FUNCTION public.kirvano(jsonb) FROM authenticated;
