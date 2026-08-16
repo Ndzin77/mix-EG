@@ -47,19 +47,11 @@ export function montarFila(bruto: Bruto[]) {
       foto: um(l.products)?.image_url ?? null,
     }))
     .sort((a, b) => {
-      /* Uma régua só: posição da bancada e hora de chegada vivem na mesma
-         escala (segundos desde a base), senão arrastar não segura o lugar. */
-      const oa = a.ordem ?? posicaoPadrao(a.criadoEm);
-      const ob = b.ordem ?? posicaoPadrao(b.criadoEm);
-      if (oa !== ob) return oa - ob;
-      return new Date(a.criadoEm).getTime() - new Date(b.criadoEm).getTime();
+      const oa = a.ordem ?? new Date(a.criadoEm).getTime() / 1000;
+      const ob = b.ordem ?? new Date(b.criadoEm).getTime() / 1000;
+      return oa - ob;
     });
 }
-
-/** Base compartilhada com o banco: segundos desde 2025-06-15. */
-const BASE_FILA = 1_750_000_000;
-const posicaoPadrao = (criadoEm: string) =>
-  new Date(criadoEm).getTime() / 1000 - BASE_FILA;
 
 export type ItemPreparo = ReturnType<typeof montarFila>[number];
 
@@ -123,39 +115,16 @@ export const marcarPreparo = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-/** Os lugares que esses itens já ocupam na fila, do menor para o maior.
- *  Redistribuir esses mesmos números mantém a coluna dentro do seu espaço. */
-async function lugaresDaFila(
-  db: { from: (t: "order_items") => any },
-  ids: string[],
-): Promise<number[]> {
-  const { data, error } = await db
-    .from("order_items")
-    .select("id, prep_ordem, created_at")
-    .in("id", ids);
-  if (error) throw new Error(error.message);
-  const linhas = (data ?? []) as { id: string; prep_ordem: number | null; created_at: string }[];
-  const lugares = ids.map((id) => {
-    const l = linhas.find((x) => x.id === id);
-    if (!l) return posicaoPadrao(new Date().toISOString());
-    return l.prep_ordem == null ? posicaoPadrao(l.created_at) : Number(l.prep_ordem);
-  });
-  return lugares.sort((a, b) => a - b);
-}
-
-/** Ordem manual: os lugares que esses itens já ocupam são redistribuídos na
- *  ordem arrastada. Assim a coluna muda de ordem sem furar a fila das outras. */
-
+/** Ordem manual da fila: a posição de cada item vira 10, 20, 30… */
 export const reordenarPreparo = createServerFn({ method: "POST" })
   .middleware([exigirAssinatura])
   .inputValidator((input: unknown) => esquemaOrdem.parse(input))
   .handler(async ({ data, context }) => {
-    const lugares = await lugaresDaFila(context.supabase, data.ids);
     await Promise.all(
       data.ids.map((id, i) =>
         context.supabase
           .from("order_items")
-          .update({ prep_ordem: lugares[i]! })
+          .update({ prep_ordem: (i + 1) * 10 })
           .eq("id", id),
       ),
     );
@@ -259,12 +228,11 @@ export const reordenarBancada = createServerFn({ method: "POST" })
     const { tenantDaBancada } = await import("@/lib/bancada.server");
     const tenant = await tenantDaBancada(data.token, data.senha);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const lugares = await lugaresDaFila(supabaseAdmin, data.ids);
     await Promise.all(
       data.ids.map((id, i) =>
         supabaseAdmin
           .from("order_items")
-          .update({ prep_ordem: lugares[i]! })
+          .update({ prep_ordem: (i + 1) * 10 })
           .eq("id", id)
           .eq("tenant_id", tenant),
       ),

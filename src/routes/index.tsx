@@ -226,7 +226,7 @@ function ModalCadastro({ onFechar }: { onFechar: () => void }) {
             <input
               autoFocus
               value={f.loja}
-              placeholder="padaria e confeitaria da Lia"
+              placeholder="EG Mix Sorveteria"
               onChange={(e) => setF({ ...f, loja: e.target.value.slice(0, 80) })}
               className={campo}
             />

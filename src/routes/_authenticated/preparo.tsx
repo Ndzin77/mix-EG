@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -40,11 +38,9 @@ export const Route = createFileRoute("/_authenticated/preparo")({
 function PreparoPage() {
   const [config] = useConfig();
   const qc = useQueryClient();
-  const [falhouEm, setFalhouEm] = useState<string | null>(null);
   const buscar = useServerFn(listarPreparo);
   const mover = useServerFn(marcarPreparo);
   const reordenar = useServerFn(reordenarPreparo);
-
 
   const fila = useQuery({
     queryKey: ["preparo"],
@@ -87,14 +83,10 @@ function PreparoPage() {
       );
       return { antes };
     },
-    onError: (e: Error, ids, ctx) => {
+    onError: (e: Error, _v, ctx) => {
       qc.setQueryData(["preparo"], ctx?.antes);
-      /* O cartão volta ao lugar tremendo: mentir seria pior que recusar. */
-      setFalhouEm(ids[0] ?? null);
-      window.setTimeout(() => setFalhouEm(null), 700);
       toast.error(e.message);
     },
-
     onSettled: () => qc.invalidateQueries({ queryKey: ["preparo"] }),
   });
 
@@ -123,8 +115,6 @@ function PreparoPage() {
             }}
             aoMarcar={(id, etapa) => marcar.mutate({ id, etapa })}
             aoReordenar={(ids) => ordenar.mutate(ids)}
-            falhouEm={falhouEm}
-
           />
         )}
       </div>

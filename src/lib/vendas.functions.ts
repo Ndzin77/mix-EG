@@ -7,8 +7,6 @@ import { faixaDaLoja } from "@/lib/relatorios";
 import type { ReciboDados } from "@/lib/recibo";
 
 const itemSchema = z.object({
-  /** linha que já existe na conta: preserva o estado dela na bancada */
-  item_id: z.string().uuid().nullable().optional(),
   product_id: z.string().uuid().nullable().optional(),
   product_name: z.string().min(1),
   unit_price: z.number().min(0),
@@ -202,7 +200,7 @@ export const salvarPedido = createServerFn({ method: "POST" })
         .eq("client_op_id", data.client_op_id)
         .maybeSingle();
       if (repetida) {
-        return { id: repetida.id, total: Number(repetida.total ?? 0), recibo: null, novos: 0 };
+        return { id: repetida.id, total: Number(repetida.total ?? 0), recibo: null };
       }
     }
 
@@ -248,83 +246,20 @@ export const salvarPedido = createServerFn({ method: "POST" })
       client_op_id: data.client_op_id ?? null,
     };
 
-    const linhaNova = (i: (typeof data.items)[number]) => ({
-      tenant_id: tenant,
-      order_id: orderIdFinal(),
-      product_id: i.product_id ?? null,
-      product_name: i.product_name,
-      unit_price: i.unit_price,
-      quantity: i.quantity,
-      subtotal: Math.round(i.unit_price * i.quantity * 100) / 100,
-    });
-
     let orderId = data.id;
-    function orderIdFinal() {
-      return orderId!;
-    }
-    /* Quantos itens realmente novos foram para a bancada nesta gravação. */
-    let itensNovos = data.items.length;
-
     if (orderId) {
       const { error } = await supabase.from("orders").update(base).eq("id", orderId);
       if (error) throw new Error(error.message);
+      const { error: erroLimpar } = await supabase
+        .from("order_items")
+        .delete()
+        .eq("order_id", orderId);
+      if (erroLimpar) throw new Error(erroLimpar.message);
       const { error: erroLimparPag } = await supabase
         .from("order_payments")
         .delete()
         .eq("order_id", orderId);
       if (erroLimparPag) throw new Error(erroLimparPag.message);
-
-      /* Conta que já existe não é reescrita: comparar preserva o estado de
-         preparo (a fazer / montando / pronto) e a hora de chegada de cada
-         item. Sem isso, pagar devolvia o pedido inteiro para a bancada. */
-      const { data: atuais, error: erroLer } = await supabase
-        .from("order_items")
-        .select("id, unit_price, quantity")
-        .eq("order_id", orderId);
-      if (erroLer) throw new Error(erroLer.message);
-
-      const existentes = new Map((atuais ?? []).map((a) => [a.id as string, a]));
-      const manter = new Set<string>();
-      const novos: typeof data.items = [];
-
-      for (const i of data.items) {
-        const atual = i.item_id ? existentes.get(i.item_id) : undefined;
-        if (!atual) {
-          novos.push(i);
-          continue;
-        }
-        manter.add(atual.id as string);
-        const mudou =
-          Number(atual.quantity ?? 0) !== i.quantity || Number(atual.unit_price ?? 0) !== i.unit_price;
-        if (mudou) {
-          const { error: erroAtualizar } = await supabase
-            .from("order_items")
-            .update({
-              quantity: i.quantity,
-              unit_price: i.unit_price,
-              subtotal: Math.round(i.unit_price * i.quantity * 100) / 100,
-            })
-            .eq("id", atual.id);
-          if (erroAtualizar) throw new Error(erroAtualizar.message);
-        }
-      }
-
-      const remover = (atuais ?? []).map((a) => a.id as string).filter((id) => !manter.has(id));
-      if (remover.length) {
-        const { error: erroRemover } = await supabase
-          .from("order_items")
-          .delete()
-          .in("id", remover);
-        if (erroRemover) throw new Error(erroRemover.message);
-      }
-
-      itensNovos = novos.length;
-      if (novos.length) {
-        const { error: erroItens } = await supabase
-          .from("order_items")
-          .insert(novos.map(linhaNova));
-        if (erroItens) throw new Error(erroItens.message);
-      }
     } else {
       const { data: novo, error } = await supabase
         .from("orders")
@@ -333,12 +268,20 @@ export const salvarPedido = createServerFn({ method: "POST" })
         .single();
       if (error) throw new Error(error.message);
       orderId = novo.id;
-
-      const { error: erroItens } = await supabase
-        .from("order_items")
-        .insert(data.items.map(linhaNova));
-      if (erroItens) throw new Error(erroItens.message);
     }
+
+    const { error: erroItens } = await supabase.from("order_items").insert(
+      data.items.map((i) => ({
+        tenant_id: tenant,
+        order_id: orderId!,
+        product_id: i.product_id ?? null,
+        product_name: i.product_name,
+        unit_price: i.unit_price,
+        quantity: i.quantity,
+        subtotal: i.unit_price * i.quantity,
+      })),
+    );
+    if (erroItens) throw new Error(erroItens.message);
 
     if (partes.length) {
       const { error: erroPag } = await supabase.from("order_payments").insert(
@@ -377,7 +320,7 @@ export const salvarPedido = createServerFn({ method: "POST" })
         }
       : null;
 
-    return { id: orderId!, total, recibo, novos: itensNovos };
+    return { id: orderId!, total, recibo };
   });
 
 /** Recibo de uma venda já gravada — para a segunda via. */
