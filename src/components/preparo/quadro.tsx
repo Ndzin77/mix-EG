@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -33,6 +35,17 @@ const minutos = (desde: string, agora: number) =>
 const hora = (iso: string) =>
   new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
+/** Vibração curta: o dedo confirma antes de o olho conferir. */
+function tocar(ms: number | number[]) {
+  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+    try {
+      navigator.vibrate(ms);
+    } catch {
+      /* aparelho sem motor: silêncio é aceitável */
+    }
+  }
+}
+
 type Ritmo = { cronometro: boolean; alertaMin: number; atrasoMin: number };
 
 /**
@@ -45,11 +58,14 @@ export function QuadroPreparo({
   ritmo,
   aoMarcar,
   aoReordenar,
+  falhouEm,
 }: {
   itens: ItemPreparo[];
   ritmo: Ritmo;
   aoMarcar: (id: string, etapa: EtapaPreparo) => void;
   aoReordenar: (ids: string[]) => void;
+  /** Id do cartão cuja nova ordem o servidor recusou: ele treme em vez de mentir. */
+  falhouEm?: string | null;
 }) {
   const [agora, setAgora] = useState(() => Date.now());
   useEffect(() => {
@@ -57,12 +73,29 @@ export function QuadroPreparo({
     return () => window.clearInterval(t);
   }, []);
 
+  const [arrastando, setArrastando] = useState<string | null>(null);
   const urlDe = useImagens(itens.map((i) => i.foto));
   const sensores = useSensors(
     /* Um arrasto curto não pode virar toque acidental no botão "Começar". */
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 8 } }),
   );
+
+  /* Cartão que apareceu depois que a tela já estava aberta chega anunciado. */
+  const vistos = useRef<Set<string> | null>(null);
+  const novos = useMemo(() => {
+    const atual = new Set(itens.map((i) => i.id));
+    if (vistos.current === null) {
+      vistos.current = atual;
+      return new Set<string>();
+    }
+    const chegaram = new Set<string>();
+    atual.forEach((id) => {
+      if (!vistos.current!.has(id)) chegaram.add(id);
+    });
+    vistos.current = atual;
+    return chegaram;
+  }, [itens]);
 
   const porEtapa = useMemo(() => {
     const m = new Map<EtapaPreparo, ItemPreparo[]>();
@@ -79,18 +112,29 @@ export function QuadroPreparo({
     ...(porEtapa.get("done") ?? []),
   ].forEach((i, k) => numero.set(i.id, k + 1));
 
+  const emFoco = (porEtapa.get("todo") ?? [])[0]?.id ?? null;
+  const item = (id: string | null) => itens.find((i) => i.id === id) ?? null;
+
   function soltar(etapa: EtapaPreparo, e: DragEndEvent) {
+    setArrastando(null);
     const lista = porEtapa.get(etapa) ?? [];
     const de = lista.findIndex((i) => i.id === e.active.id);
     const para = lista.findIndex((i) => i.id === e.over?.id);
     if (de < 0 || para < 0 || de === para) return;
+    tocar(18);
     aoReordenar(arrayMove(lista, de, para).map((i) => i.id));
+  }
+
+  function pegar(e: DragStartEvent) {
+    setArrastando(String(e.active.id));
+    tocar(12);
   }
 
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       {colunas.map((col) => {
         const lista = porEtapa.get(col.etapa) ?? [];
+        const voando = item(arrastando);
         return (
           <section
             key={col.etapa}
@@ -107,6 +151,8 @@ export function QuadroPreparo({
             <DndContext
               sensors={sensores}
               collisionDetection={closestCenter}
+              onDragStart={pegar}
+              onDragCancel={() => setArrastando(null)}
               onDragEnd={(e) => soltar(col.etapa, e)}
             >
               <SortableContext
@@ -132,12 +178,34 @@ export function QuadroPreparo({
                         foto={urlDe(i.foto)}
                         min={minutos(i.criadoEm, agora)}
                         ritmo={ritmo}
+                        proximo={i.id === emFoco}
+                        recuado={col.etapa === "todo" && emFoco !== null && i.id !== emFoco}
+                        novo={novos.has(i.id)}
+                        tremer={falhouEm === i.id}
                         aoMarcar={aoMarcar}
                       />
                     ))
                   )}
                 </ul>
               </SortableContext>
+
+              {/* O cartão levanta da pilha e viaja na mão. */}
+              <DragOverlay dropAnimation={{ duration: 160, easing: "cubic-bezier(.2,.9,.25,1)" }}>
+                {voando && voando.etapa === col.etapa ? (
+                  <ul className="fila-voa list-none">
+                    <CartaoBase
+                      item={voando}
+                      etapa={col.etapa}
+                      posicao={numero.get(voando.id) ?? 0}
+                      foto={urlDe(voando.foto)}
+                      min={minutos(voando.criadoEm, agora)}
+                      ritmo={ritmo}
+                      proximo={voando.id === emFoco}
+                      aoMarcar={() => {}}
+                    />
+                  </ul>
+                ) : null}
+              </DragOverlay>
             </DndContext>
           </section>
         );
@@ -146,51 +214,121 @@ export function QuadroPreparo({
   );
 }
 
-function Cartao({
-  item,
-  etapa,
-  posicao,
-  foto,
-  min,
-  ritmo,
-  aoMarcar,
-}: {
+type CartaoProps = {
   item: ItemPreparo;
   etapa: EtapaPreparo;
   posicao: number;
   foto?: string;
   min: number;
   ritmo: Ritmo;
+  proximo?: boolean;
+  recuado?: boolean;
+  novo?: boolean;
+  tremer?: boolean;
   aoMarcar: (id: string, etapa: EtapaPreparo) => void;
-}) {
+};
+
+function Cartao(props: CartaoProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: item.id,
+    id: props.item.id,
   });
+
+  return (
+    <CartaoBase
+      {...props}
+      refCartao={setNodeRef}
+      estilo={{
+        transform: CSS.Transform.toString(transform),
+        transition: transition ?? "transform 180ms cubic-bezier(.2,.9,.25,1)",
+        opacity: isDragging ? 0.35 : undefined,
+      }}
+      pegador={{ ...attributes, ...listeners }}
+    />
+  );
+}
+
+function CartaoBase({
+  item,
+  etapa,
+  posicao,
+  foto,
+  min,
+  ritmo,
+  proximo,
+  recuado,
+  novo,
+  tremer,
+  aoMarcar,
+  refCartao,
+  estilo,
+  pegador,
+}: CartaoProps & {
+  refCartao?: (n: HTMLElement | null) => void;
+  estilo?: React.CSSProperties;
+  pegador?: Record<string, unknown>;
+}) {
   const urgente = ritmo.cronometro && min >= ritmo.atrasoMin;
   const atencao = ritmo.cronometro && min >= ritmo.alertaMin;
+  const [fecho, setFecho] = useState<"pronto" | "saindo" | null>(null);
+
+  /* Fechamento sensorial: o corpo termina a tarefa antes da tela recarregar. */
+  function avancar() {
+    const alvo: EtapaPreparo = etapa === "todo" ? "doing" : etapa === "doing" ? "done" : "delivered";
+    if (alvo === "done") {
+      setFecho("pronto");
+      tocar([14, 40, 22]);
+      window.setTimeout(() => setFecho(null), 600);
+      aoMarcar(item.id, alvo);
+      return;
+    }
+    if (alvo === "delivered") {
+      setFecho("saindo");
+      tocar(20);
+      window.setTimeout(() => aoMarcar(item.id, alvo), 200);
+      return;
+    }
+    tocar(10);
+    aoMarcar(item.id, alvo);
+  }
 
   return (
     <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      ref={refCartao}
+      style={estilo}
       className={cn(
-        "rise-in rounded-xl border-2 bg-background p-3",
-        isDragging && "z-10 scale-[1.02] shadow-xl",
+        "relative rounded-xl border-2 bg-background p-3 transition-[opacity,filter]",
+        novo ? "fila-entra" : "rise-in",
+        fecho === "pronto" && "varredura-pronto",
+        fecho === "saindo" && "fila-sai",
+        tremer && "shake border-danger",
         urgente ? "animate-pulse border-danger" : atencao ? "border-warning" : "border-border",
+        proximo && !urgente && !atencao && "border-primary",
+        proximo && "shadow-md ring-2 ring-primary/35",
+        recuado && "opacity-70",
       )}
     >
+      {novo ? (
+        <span className="absolute -top-2 right-3 rounded-full bg-primary px-2 py-0.5 text-[0.65rem] font-black uppercase tracking-wide text-primary-foreground">
+          + novo
+        </span>
+      ) : null}
+
       <div className="flex items-center gap-2.5">
         <button
           type="button"
           aria-label="Arrastar para mudar a ordem"
-          className="touch-none grid h-14 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground/60 hover:bg-secondary"
-          {...attributes}
-          {...listeners}
+          className="grid h-12 w-12 shrink-0 touch-none place-items-center rounded-lg text-muted-foreground/70 hover:bg-secondary active:bg-secondary"
+          {...pegador}
         >
-          <GripVertical className="size-5" />
+          <GripVertical className="size-6" />
         </button>
 
-        <span className="money grid size-11 shrink-0 place-items-center rounded-xl bg-foreground text-lg tabular-nums text-background">
+        <span
+          className={cn(
+            "money grid size-11 shrink-0 place-items-center rounded-xl text-lg tabular-nums",
+            proximo ? "bg-primary text-primary-foreground" : "bg-foreground text-background",
+          )}
+        >
           #{posicao}
         </span>
 
@@ -235,9 +373,7 @@ function Cartao({
         ) : null}
         <button
           type="button"
-          onClick={() =>
-            aoMarcar(item.id, etapa === "todo" ? "doing" : etapa === "doing" ? "done" : "delivered")
-          }
+          onClick={avancar}
           className={cn(
             "press h-12 flex-1 rounded-xl font-display text-xl tracking-wide",
             etapa === "todo"

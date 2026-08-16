@@ -44,6 +44,8 @@ export type Linha = Produto & {
   qtd: number;
   /** nome que vai para a conta/recibo: "Açaí — Premium", "Sorvete 350 g" */
   rotulo?: string;
+  /** linha que já está gravada numa conta aberta: preserva o estado na bancada */
+  itemId?: string;
 };
 
 export const modoDoProduto = (p: Produto): ModoPreco => p.modo ?? "fixed";

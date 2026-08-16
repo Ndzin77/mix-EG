@@ -81,11 +81,29 @@ function BancadaPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: chave }),
   });
 
+  const [falhouEm, setFalhouEm] = useState<string | null>(null);
   const ordenar = useMutation({
     mutationFn: (ids: string[]) => reordenar({ data: { token, senha, ids } }),
-    onError: (e: Error) => toast.error(e.message),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: chave });
+      const antes = qc.getQueryData(chave);
+      qc.setQueryData(chave, (lista: ItemPreparo[] | undefined) =>
+        (lista ?? []).map((i) => {
+          const k = ids.indexOf(i.id);
+          return k < 0 ? i : { ...i, ordem: (k + 1) * 10 };
+        }),
+      );
+      return { antes };
+    },
+    onError: (e: Error, ids, ctx) => {
+      qc.setQueryData(chave, ctx?.antes);
+      setFalhouEm(ids[0] ?? null);
+      window.setTimeout(() => setFalhouEm(null), 700);
+      toast.error(e.message);
+    },
     onSettled: () => qc.invalidateQueries({ queryKey: chave }),
   });
+
 
   function entrar(e: React.FormEvent) {
     e.preventDefault();
@@ -173,6 +191,8 @@ function BancadaPage() {
             ritmo={{ cronometro: true, alertaMin: 8, atrasoMin: 15 }}
             aoMarcar={(id, etapa) => marcar.mutate({ id, etapa })}
             aoReordenar={(ids) => ordenar.mutate(ids)}
+            falhouEm={falhouEm}
+
           />
         )}
       </div>

@@ -316,6 +316,10 @@ function VendasPage() {
   const linhasParaBanco = useCallback(
     (linhas: Linha[]) =>
       linhas.map((l) => ({
+        /* Linha que já existe na conta viaja com a própria identidade: assim o
+           servidor atualiza em vez de recriar, e a bancada não recebe de volta
+           um pedido que já foi montado. */
+        ...(l.itemId ? { item_id: l.itemId } : {}),
         product_id: l.id.includes("-") && l.id.length === 36 ? l.id : null,
         product_name: l.rotulo ?? l.nome,
         unit_price: l.preco,
@@ -469,6 +473,7 @@ function VendasPage() {
       setCarrinho(
         comanda.itens.map((i, ix) => ({
           uid: i.id ?? `${comanda.id}-${ix}`,
+          itemId: i.id ?? undefined,
           id: i.product_id ?? `${comanda.id}-${i.product_name}`,
           cod: "",
           nome: i.product_name,
