@@ -3,7 +3,7 @@ import { ArrowLeft, Check, Pencil, Scale } from "lucide-react";
 import { Modal } from "@/components/modal";
 import { brl } from "@/lib/config";
 import { cn } from "@/lib/utils";
-import { Foto, modoDoProduto, type Produto, type Sabor } from "./comum";
+import { Foto, modoDoProduto, type GrupoOpcao, type Produto, type Sabor } from "./comum";
 
 /** O que a venda precisa saber depois que o preço foi resolvido. */
 export type PrecoResolvido = {
@@ -269,8 +269,9 @@ export function ModalPreco({
 }
 
 /**
- * Sabor que não mexe no preço: uma pergunta, botões grandes, um toque.
- * O olho lê o sabor antes do preço — por isso o nome ocupa a linha inteira.
+ * Escolhas que não mexem no preço, em blocos: Sabores primeiro, depois cada
+ * grupo que o dono criou (Complementos, Calda...). Um bloco por vez no olhar:
+ * título numerado, contador ao vivo e resumo fixo antes de lançar.
  */
 export function ModalOpcao({
   produto,
@@ -283,75 +284,117 @@ export function ModalOpcao({
   onFechar: () => void;
   onEscolher: (opcao: string) => void;
 }) {
-  const opcoes = produto.opcoes ?? [];
-  const multi = produto.opcoesMulti === true;
-  const [marcados, setMarcados] = useState<string[]>([]);
+  const grupos: (GrupoOpcao & { principal?: boolean })[] = [
+    ...(produto.opcoes?.length
+      ? [{ nome: "Sabores", multi: produto.opcoesMulti === true, opcoes: produto.opcoes, principal: true }]
+      : []),
+    ...(produto.grupos ?? []),
+  ];
+  const [marcados, setMarcados] = useState<string[][]>(() => grupos.map(() => []));
 
-  const alternar = (o: string) =>
-    setMarcados((m) => (m.includes(o) ? m.filter((x) => x !== o) : [...m, o]));
+  // Atalho: só um grupo de escolha única = um toque e pronto, como antes.
+  const toqueUnico = grupos.length === 1 && !grupos[0].multi;
+
+  const alternar = (gi: number, o: string) => {
+    const g = grupos[gi];
+    if (toqueUnico) return onEscolher(o);
+    setMarcados((m) =>
+      m.map((sel, i) =>
+        i !== gi ? sel : g.multi ? (sel.includes(o) ? sel.filter((x) => x !== o) : [...sel, o]) : sel[0] === o ? [] : [o],
+      ),
+    );
+  };
+
+  // Sabores (quando existem) são obrigatórios; os grupos extras são opcionais.
+  const faltaPrincipal = grupos[0]?.principal && marcados[0]?.length === 0;
+  const resumo = grupos
+    .map((g, i) =>
+      marcados[i]?.length ? (g.principal ? marcados[i].join(" + ") : `${g.nome}: ${marcados[i].join(", ")}`) : "",
+    )
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <Modal
-      titulo={multi ? "Quais sabores?" : "Qual sabor?"}
-      subtitulo={produto.nome}
-      onFechar={onFechar}
-    >
+    <Modal titulo="Monte o pedido" subtitulo={produto.nome} onFechar={onFechar}>
       <div className="mb-4 flex items-center gap-3">
         <Foto produto={produto} url={url} className="size-14" />
         <p className="text-sm text-muted-foreground">
-          {multi
-            ? "Pode marcar quantos quiser — o preço continua o mesmo."
-            : "Todos custam o mesmo — a escolha só aparece na conta e no recibo."}
+          As escolhas não mudam o preço — só aparecem na conta, no preparo e no recibo.
         </p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {opcoes.map((o) => {
-          const escolhido = marcados.includes(o);
+
+      <div className="grid gap-5">
+        {grupos.map((g, gi) => {
+          const sel = marcados[gi] ?? [];
           return (
-            <button
-              key={o}
-              type="button"
-              onClick={() => (multi ? alternar(o) : onEscolher(o))}
-              aria-pressed={multi ? escolhido : undefined}
-              className={cn(
-                "press flex h-16 items-center justify-between gap-3 rounded-xl border-2 px-4 text-left font-display text-xl tracking-wide",
-                escolhido
-                  ? "border-primary bg-primary-soft"
-                  : "border-border bg-secondary/30 hover:border-primary hover:bg-primary-soft",
-              )}
-            >
-              <span className="truncate">{o}</span>
-              {multi ? (
+            <section key={`${g.nome}-${gi}`} className="fade-in">
+              <header className="mb-2 flex items-center gap-2">
                 <span
                   className={cn(
-                    "grid size-6 shrink-0 place-items-center rounded-md border-2",
-                    escolhido ? "border-primary bg-primary text-primary-foreground" : "border-border",
+                    "grid size-7 place-items-center rounded-full text-sm font-black transition-colors",
+                    sel.length ? "bg-success text-success-foreground" : "bg-secondary text-foreground",
                   )}
                 >
-                  {escolhido ? <Check className="size-4" /> : null}
+                  {sel.length ? <Check className="size-4" strokeWidth={3} /> : gi + 1}
                 </span>
-              ) : (
-                <Check className="size-5 shrink-0 text-primary" />
-              )}
-            </button>
+                <h3 className="font-display text-xl tracking-wide">{g.nome}</h3>
+                <span className="ml-auto rounded-full bg-secondary px-2 py-0.5 text-xs font-bold">
+                  {g.multi ? (sel.length ? `${sel.length} marcados` : "vários") : "escolha 1"}
+                  {g.principal ? "" : " · opcional"}
+                </span>
+              </header>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {g.opcoes.map((o) => {
+                  const on = sel.includes(o);
+                  return (
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => alternar(gi, o)}
+                      aria-pressed={on}
+                      className={cn(
+                        "press flex h-14 items-center justify-between gap-3 rounded-xl border-2 px-4 text-left font-display text-lg tracking-wide transition-colors",
+                        on
+                          ? "border-primary bg-primary-soft"
+                          : "border-border bg-secondary/30 hover:border-primary hover:bg-primary-soft",
+                      )}
+                    >
+                      <span className="truncate">{o}</span>
+                      <span
+                        className={cn(
+                          "grid size-6 shrink-0 place-items-center border-2",
+                          g.multi ? "rounded-md" : "rounded-full",
+                          on ? "border-primary bg-primary text-primary-foreground" : "border-border",
+                        )}
+                      >
+                        {on ? <Check className="size-4" /> : null}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           );
         })}
       </div>
 
-      {/* Confirmar só existe no modo vários: com um sabor só, o toque já resolve. */}
-      {multi ? (
-        <button
-          type="button"
-          disabled={marcados.length === 0}
-          onClick={() => onEscolher(marcados.join(" + "))}
-          className="press mt-4 h-16 w-full rounded-2xl bg-primary font-display text-2xl tracking-wide text-primary-foreground disabled:opacity-40"
-        >
-          {marcados.length === 0
-            ? "Escolha ao menos um"
-            : `Lançar (${marcados.length} ${marcados.length === 1 ? "sabor" : "sabores"})`}
-        </button>
-      ) : null}
+      {toqueUnico ? null : (
+        <div className="sticky bottom-0 mt-5 grid gap-2 border-t border-border bg-card pt-3">
+          <p className="min-h-5 truncate text-sm font-bold text-muted-foreground">
+            {resumo || "Nada escolhido ainda"}
+          </p>
+          <button
+            type="button"
+            disabled={faltaPrincipal}
+            onClick={() => onEscolher(resumo || "")}
+            className="press h-16 w-full rounded-2xl bg-primary font-display text-2xl tracking-wide text-primary-foreground disabled:opacity-40"
+          >
+            {faltaPrincipal ? "Escolha o sabor" : "Lançar"}
+          </button>
+        </div>
+      )}
     </Modal>
   );
 }
+
 

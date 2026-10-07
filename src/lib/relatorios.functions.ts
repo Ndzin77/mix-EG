@@ -15,6 +15,16 @@ const entrada = z.object({
 /** Resumo agregado de um período: totais, série do gráfico, ranking de
  *  produtos, formas de pagamento e saídas por categoria. RLS já limita
  *  tudo à empresa do usuário logado. */
+
+/** Nome principal do produto: soma todas as variações (sabores, complementos)
+ *  numa linha só no ranking. Usa o cadastro; se o produto foi apagado, corta o
+ *  texto antes do primeiro separador. */
+function nomeBase(i: { product_name: string; products?: { name: string } | { name: string }[] | null }) {
+  const p = Array.isArray(i.products) ? i.products[0] : i.products;
+  if (p?.name) return p.name;
+  return i.product_name.split(/ — | · /)[0].trim() || i.product_name;
+}
+
 export const resumoPeriodo = createServerFn({ method: "GET" })
   .middleware([exigirAssinatura])
   .inputValidator((input: unknown) => entrada.parse(input ?? {}))
@@ -54,11 +64,11 @@ export const resumoPeriodo = createServerFn({ method: "GET" })
     if (ids.length) {
       const { data: dadosItens, error } = await supabase
         .from("order_items")
-        .select("product_name, quantity, subtotal")
+        .select("product_name, quantity, subtotal, products(name)")
         .in("order_id", ids);
       if (error) throw new Error(error.message);
       itens = (dadosItens ?? []).map((i) => ({
-        nome: i.product_name,
+        nome: nomeBase(i as never),
         qtd: Number(i.quantity ?? 0),
         valor: Number(i.subtotal ?? 0),
       }));
@@ -272,12 +282,12 @@ export const fechamentoDiario = createServerFn({ method: "GET" })
     if (ids.length) {
       const { data: linhas, error } = await supabase
         .from("order_items")
-        .select("order_id, product_name, quantity, subtotal")
+        .select("order_id, product_name, quantity, subtotal, products(name)")
         .in("order_id", ids);
       if (error) throw new Error(error.message);
       itens = (linhas ?? []).map((i) => ({
         order_id: i.order_id,
-        product_name: i.product_name,
+        product_name: nomeBase(i as never),
         quantity: Number(i.quantity ?? 0),
         subtotal: Number(i.subtotal ?? 0),
       }));

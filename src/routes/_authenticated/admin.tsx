@@ -46,7 +46,8 @@ import {
   salvarLoja,
   salvarProduto,
 } from "@/lib/loja.functions";
-import type { ModoPreco } from "@/components/pdv/comum";
+import { lerGrupos, type GrupoOpcao, type ModoPreco } from "@/components/pdv/comum";
+import { EditorGrupos } from "@/components/admin/editor-grupos";
 import { cn } from "@/lib/utils";
 import { AvisoErro } from "@/components/aviso-erro";
 
@@ -99,6 +100,8 @@ type Rascunho = {
   opcoes: string[];
   /** deixa o caixa marcar vários desses sabores na mesma venda */
   opcoesMulti: boolean;
+  /** grupos extras com nome livre: Complementos, Calda... */
+  grupos: GrupoOpcao[];
 };
 
 const rascunhoVazio: Rascunho = {
@@ -114,6 +117,7 @@ const rascunhoVazio: Rascunho = {
   sabores: [],
   opcoes: [],
   opcoesMulti: false,
+  grupos: [],
 };
 
 /** As quatro formas de o preço nascer, explicadas em uma frase cada. */
@@ -241,6 +245,9 @@ function AdminPage() {
             })),
           opcoes: r.opcoes.map((o) => o.trim()).filter(Boolean),
           opcoes_multi: r.opcoesMulti,
+          grupos_opcoes: r.grupos
+            .map((g) => ({ ...g, nome: g.nome.trim() }))
+            .filter((g) => g.nome && g.opcoes.length),
         },
       }),
     onSuccess: () => {
@@ -550,6 +557,9 @@ function AdminPage() {
                                             }))
                                           : [],
                                         opcoesMulti: p.opcoes_multi === true,
+                                        grupos: lerGrupos(
+                                          (p as { grupos_opcoes?: unknown }).grupos_opcoes,
+                                        ),
                                         opcoes: Array.isArray(p.opcoes)
                                           ? (p.opcoes as string[])
                                           : [],
@@ -1045,6 +1055,11 @@ function AdminPage() {
             ) : null}
 
 
+
+            <EditorGrupos
+              grupos={rascunho.grupos}
+              onChange={(grupos) => setRascunho({ ...rascunho, grupos })}
+            />
 
             {rascunho.modo === "flavor" ? (
               <div className="sm:col-span-2">

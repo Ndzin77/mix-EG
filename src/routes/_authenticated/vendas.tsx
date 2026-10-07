@@ -31,6 +31,8 @@ import {
   buscar,
   modoDoProduto,
   seloPreco,
+  lerGrupos,
+  temEscolhas,
   useContagem,
   type ComandaCard,
   type Linha,
@@ -129,6 +131,7 @@ function VendasPage() {
             : [],
           opcoes: Array.isArray(p.opcoes) ? (p.opcoes as string[]) : [],
           opcoesMulti: p.opcoes_multi === true,
+          grupos: lerGrupos((p as { grupos_opcoes?: unknown }).grupos_opcoes),
         })),
     [produtosQuery.data],
   );
@@ -259,7 +262,7 @@ function VendasPage() {
 
   const adicionar = useCallback(
     (p: Produto) => {
-      if (p.opcoes?.length) {
+      if (temEscolhas(p)) {
         setOpcaoEscolhida(null);
         setOpcaoDe(p);
         return;
@@ -1003,13 +1006,13 @@ function VendasPage() {
             if (modoDoProduto(p) === "fixed") {
               lancar(p, {
                 preco: p.preco,
-                rotulo: `${p.nome} — ${o}`,
+                rotulo: o ? `${p.nome} — ${o}` : p.nome,
                 qtd: 1,
-                chave: `${p.id}:${o}`,
+                chave: o ? `${p.id}:${o}` : p.id,
               });
               return;
             }
-            setOpcaoEscolhida(o);
+            setOpcaoEscolhida(o || null);
             setPrecoDe(p);
           }}
         />

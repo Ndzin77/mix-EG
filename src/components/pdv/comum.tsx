@@ -35,7 +35,29 @@ export type Produto = {
   opcoes?: string[];
   /** deixa o caixa marcar vários sabores (bolinhas) sem mudar o preço */
   opcoesMulti?: boolean;
+  /** grupos extras nomeados pelo dono: "Complementos", "Calda"... */
+  grupos?: GrupoOpcao[];
 };
+
+/** Um grupo de escolhas que não muda o preço, com nome livre. */
+export type GrupoOpcao = { nome: string; multi: boolean; opcoes: string[] };
+
+/** Lê o JSON do banco com tolerância: descarta grupos vazios ou malformados. */
+export function lerGrupos(v: unknown): GrupoOpcao[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((g) => ({
+      nome: String((g as GrupoOpcao)?.nome ?? "").trim(),
+      multi: (g as GrupoOpcao)?.multi === true,
+      opcoes: Array.isArray((g as GrupoOpcao)?.opcoes)
+        ? (g as GrupoOpcao).opcoes.map((o) => String(o).trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((g) => g.nome && g.opcoes.length);
+}
+
+/** Produto pede escolha antes de lançar? */
+export const temEscolhas = (p: Produto) => !!(p.opcoes?.length || p.grupos?.length);
 
 /** Linha do carrinho. `uid` é a identidade da linha: duas pesagens do mesmo
  *  produto convivem sem se somar; o preço fixo continua agrupando pelo id. */
@@ -57,6 +79,7 @@ export function seloPreco(p: Produto): string | null {
   if (m === "manual") return "preço na hora";
   if (m === "weight") return `R$ ${(p.precoKg ?? 0).toFixed(2).replace(".", ",")} / kg`;
   if (p.opcoes?.length) return `${p.opcoes.length} sabores`;
+  if (p.grupos?.length) return p.grupos.map((g) => g.nome).join(" · ");
   return null;
 }
 

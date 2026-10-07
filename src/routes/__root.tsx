@@ -41,7 +41,8 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error: e, reset }: { error: unknown; reset: () => void }) {
+  const error = (e instanceof Error ? e : new Error(String(e))) as Error;
   const router = useRouter();
   const rota = typeof window !== "undefined" ? window.location.pathname + window.location.search : "";
   const detalhe = [

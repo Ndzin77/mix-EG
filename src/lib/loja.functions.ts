@@ -29,6 +29,17 @@ const produtoSchema = z.object({
   opcoes: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
   /** deixa marcar vários desses sabores na mesma venda, pelo mesmo preço */
   opcoes_multi: z.boolean().default(false),
+  /** grupos extras nomeados ("Complementos", "Calda"), mesmo preço */
+  grupos_opcoes: z
+    .array(
+      z.object({
+        nome: z.string().trim().min(1).max(40),
+        multi: z.boolean().default(false),
+        opcoes: z.array(z.string().trim().min(1).max(40)).min(1).max(40),
+      }),
+    )
+    .max(10)
+    .default([]),
 });
 
 export type ProdutoInput = z.infer<typeof produtoSchema>;
@@ -39,7 +50,7 @@ export const listarProdutos = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("products")
       .select(
-        "id, name, code, category, tags, price, active, image_url, pricing_mode, price_per_kg, variants, opcoes, opcoes_multi",
+        "id, name, code, category, tags, price, active, image_url, pricing_mode, price_per_kg, variants, opcoes, opcoes_multi, grupos_opcoes",
       )
       .order("name", { ascending: true });
     if (error) throw new Error(error.message);
@@ -67,6 +78,7 @@ export const salvarProduto = createServerFn({ method: "POST" })
       variants: data.pricing_mode === "flavor" ? data.variants : [],
       opcoes: data.opcoes,
       opcoes_multi: data.opcoes_multi,
+      grupos_opcoes: data.grupos_opcoes,
     };
 
     const query = data.id
