@@ -25,6 +25,26 @@ function nomeBase(i: { product_name: string; products?: { name: string } | { nam
   return i.product_name.split(/ — | · /)[0].trim() || i.product_name;
 }
 
+/** Lê o texto gravado na venda ("Sorvete — Morango + Uva · Calda: Chocolate")
+ *  e devolve cada escolha separada, para contar sabores e complementos. */
+function lerEscolhas(texto: string): { grupo: string; opcao: string }[] {
+  const corte = texto.indexOf(" — ");
+  if (corte < 0) return [];
+  const saida: { grupo: string; opcao: string }[] = [];
+  for (const parte of texto.slice(corte + 3).split(" · ")) {
+    const p = parte.trim();
+    if (!p || /^\d+([.,]\d+)?\s*(g|kg)$/i.test(p)) continue;
+    const dois = p.indexOf(": ");
+    if (dois > 0) {
+      const grupo = p.slice(0, dois).trim();
+      for (const o of p.slice(dois + 2).split(", ")) if (o.trim()) saida.push({ grupo, opcao: o.trim() });
+    } else {
+      for (const o of p.split(" + ")) if (o.trim()) saida.push({ grupo: "Sabores", opcao: o.trim() });
+    }
+  }
+  return saida;
+}
+
 export const resumoPeriodo = createServerFn({ method: "GET" })
   .middleware([exigirAssinatura])
   .inputValidator((input: unknown) => entrada.parse(input ?? {}))
@@ -61,6 +81,7 @@ export const resumoPeriodo = createServerFn({ method: "GET" })
     const linhasPagas = pagos.data ?? [];
     const ids = linhasPagas.map((o) => o.id);
     let itens: { nome: string; qtd: number; valor: number }[] = [];
+    const escolhasMapa = new Map<string, Map<string, number>>();
     if (ids.length) {
       const { data: dadosItens, error } = await supabase
         .from("order_items")
@@ -72,7 +93,24 @@ export const resumoPeriodo = createServerFn({ method: "GET" })
         qtd: Number(i.quantity ?? 0),
         valor: Number(i.subtotal ?? 0),
       }));
+      for (const i of dadosItens ?? []) {
+        const qtd = Number(i.quantity ?? 0);
+        for (const { grupo, opcao } of lerEscolhas(i.product_name)) {
+          const g = escolhasMapa.get(grupo) ?? new Map<string, number>();
+          g.set(opcao, (g.get(opcao) ?? 0) + qtd);
+          escolhasMapa.set(grupo, g);
+        }
+      }
     }
+    const escolhas = [...escolhasMapa.entries()]
+      .map(([grupo, m]) => ({
+        grupo,
+        itens: [...m.entries()]
+          .map(([nome, qtd]) => ({ nome, qtd: arred(qtd) }))
+          .sort((a, b) => b.qtd - a.qtd)
+          .slice(0, 10),
+      }))
+      .sort((a, b) => (a.grupo === "Sabores" ? -1 : b.grupo === "Sabores" ? 1 : a.grupo.localeCompare(b.grupo)));
 
     const { rotulos, indice } = eixo(intervalo, data.offsetMin);
     const serie = rotulos.map((rotulo) => ({ rotulo, entrada: 0, saida: 0 }));
@@ -156,6 +194,7 @@ export const resumoPeriodo = createServerFn({ method: "GET" })
         other: arred(formas.other ?? 0),
       },
       top,
+      escolhas,
       saidasPorCategoria: Object.fromEntries(
         Object.entries(porCategoria)
           .map(([k, v]) => [k, arred(v)] as const)

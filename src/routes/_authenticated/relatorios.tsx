@@ -240,6 +240,35 @@ function RelatoriosPage() {
                       <p className="mt-1 text-xs font-bold text-muted-foreground">
                         Campeão: {top[0]?.nome} — {top[0]?.qtd}un · R$ {brl(top[0]?.valor ?? 0)}
                       </p>
+                      {data.escolhas.length > 0 ? (
+                        <details className="group mt-4 rounded-xl border border-border bg-muted/40 p-3">
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-extrabold">
+                            <span>Sabores e complementos mais pedidos</span>
+                            <span className="text-xs font-bold text-muted-foreground transition-transform group-open:rotate-180">
+                              ▾
+                            </span>
+                          </summary>
+                          <div className="mt-3 space-y-5">
+                            <p className="text-xs font-bold text-muted-foreground">
+                              Quantas vezes cada opção saiu — use para saber o que repor primeiro.
+                            </p>
+                            {data.escolhas.map((g) => (
+                              <div key={g.grupo}>
+                                <p className="mb-2 text-sm font-extrabold">
+                                  {g.grupo}{" "}
+                                  <span className="text-xs font-bold text-muted-foreground">
+                                    · campeão: {g.itens[0]?.nome} ({g.itens[0]?.qtd}×)
+                                  </span>
+                                </p>
+                                <BarrasRanking
+                                  itens={g.itens.map((o) => ({ nome: o.nome, valor: o.qtd }))}
+                                  formato="quantidade"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
                     </>
                   )}
                 </Sanfona>

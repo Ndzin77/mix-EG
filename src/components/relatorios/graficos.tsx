@@ -46,7 +46,7 @@ function Caixa({
   rotulo,
 }: {
   ativo?: boolean;
-  itens?: { name?: string; value?: number | string; color?: string }[];
+  itens?: { name?: string; value?: number | string; color?: string; qtd?: boolean }[];
   rotulo?: string;
 }) {
   if (!ativo || !itens?.length) return null;
@@ -57,7 +57,10 @@ function Caixa({
       </p>
       {itens.map((i) => (
         <p key={i.name} className="money text-sm tabular-nums" style={{ color: i.color }}>
-          {i.name}: R$ {brl(Number(i.value ?? 0))}
+          {i.name}:{" "}
+          {i.qtd
+            ? `${Number(i.value ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 3 })} un`
+            : `R$ ${brl(Number(i.value ?? 0))}`}
         </p>
       ))}
     </div>
@@ -171,6 +174,7 @@ export function BarrasRanking({
                     name: formato === "moeda" ? "Total" : "Vendidos",
                     value: payload?.[0]?.value as number,
                     color: cor,
+                    qtd: formato === "quantidade",
                   },
                 ]}
               />
